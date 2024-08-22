@@ -1,7 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Bot.ListenYoutube.Models;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
@@ -16,6 +16,7 @@ namespace Bot.ListenYoutube.Services;
 public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger, IHttpClientFactory clientFactory, IConfiguration configuration) : IUpdateHandler
 {
     private static readonly InputPollOption[] PollOptions = ["Hello", "World!"];
+    private readonly Dictionary<long, AudioMode> _inMemorySettings = [];
 
     public async Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, HandleErrorSource source, CancellationToken cancellationToken)
     {
@@ -49,19 +50,17 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
 
         var sentMessage = await (messageText.Split(' ')[0] switch
         {
-            "/photo" => SendPhoto(msg),
-            "/inline_buttons" => SendInlineKeyboard(msg),
-            "/keyboard" => SendReplyKeyboard(msg),
-            "/remove" => RemoveKeyboard(msg),
-            "/request" => RequestContactAndLocation(msg),
-            "/inline_mode" => StartInlineQuery(msg),
-            "/poll" => SendPoll(msg),
-            "/poll_anonymous" => SendAnonymousPoll(msg),
-            "/throw" => FailingHandler(msg),
-            "/usage" => Usage(msg),
+            "/mode" => SendInlineModeKeyboard(msg),
             _ => DefaultBehaviour(msg)
         });
         logger.LogInformation("The message was sent with id: {SentMessageId}", sentMessage.MessageId);
+    }
+
+    private async Task<Message> SendInlineModeKeyboard(Message msg)
+    {
+        var inlineMarkup = new InlineKeyboardMarkup()
+            .AddNewRow("Both", "Voice", "Audio");
+        return await bot.SendTextMessageAsync(msg.Chat, "Inline buttons:", replyMarkup: inlineMarkup);
     }
 
     private async Task<Message> DefaultBehaviour(Message msg)
@@ -70,22 +69,35 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
 
         try
         {
+            // first of all wee need to get settings from memory storage
+            var getSettingsResult = _inMemorySettings.TryGetValue(msg.Chat.Id, out var mode);
+            if (getSettingsResult == false)
+            {
+                mode = AudioMode.Both;
+                _inMemorySettings.Add(msg.Chat.Id, AudioMode.Both);
+            }
+            
+            logger.LogInformation("Selected message mode: {Mode}", mode);
+
             var msgText = msg.Text;
             if (msgText == null)
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Message text is null");
+                return await bot.SendTextMessageAsync(msg.Chat, "Message text is null",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
             if ((msgText.StartsWith("https://youtube.com") || msgText.StartsWith("https://www.youtube.com") ||
                  msgText.StartsWith("https://youtu.be")) == false)
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Only the YouTube links are allowed");
+                return await bot.SendTextMessageAsync(msg.Chat, "Only the YouTube links are allowed",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
             var url = msgText.Split(' ')[0];
             if (string.IsNullOrEmpty(url))
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Url is empty");
+                return await bot.SendTextMessageAsync(msg.Chat, "Url is empty",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
             var httpClient = clientFactory.CreateClient();
@@ -95,7 +107,8 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             if (healthUrl == null)
             {
                 return await bot.SendTextMessageAsync(msg.Chat,
-                    "Unable to check the fact that the main endpoint is healthy");
+                    "Unable to check the fact that the main endpoint is healthy",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
             var healthRequest = new HttpRequestMessage
@@ -106,7 +119,8 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             using var healthResponse = await httpClient.SendAsync(healthRequest);
             if (healthResponse.IsSuccessStatusCode == false)
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Audio microservice is unhealthy");
+                return await bot.SendTextMessageAsync(msg.Chat, "Audio microservice is unhealthy",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
             var authServer = configuration["Urls:AuthServer"];
@@ -115,20 +129,23 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
 
             if ((authServer != null && clientId != null && clientSecret != null) == false)
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot");
+                return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
             var authData = await GetAuthData(httpClient, authServer, clientId, clientSecret);
             if (authData == null)
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot");
+                return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
             
             var audioEndpointUrl = configuration["Urls:AudioEndpoint"];
             if (audioEndpointUrl == null)
             {
                 return await bot.SendTextMessageAsync(msg.Chat,
-                    "Unable to send the request to audio endpoint. Provide url to the endpoint");
+                    "Unable to send the request to audio endpoint. Provide url to the endpoint",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
             var audioRequest = new HttpRequestMessage
@@ -144,14 +161,16 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             using var audioResponse = await httpClient.SendAsync(audioRequest);
             if (audioResponse.IsSuccessStatusCode == false)
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful");
+                return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
             var (_, lastHeaderValue) = audioResponse.Content.Headers.LastOrDefault();
             var attachmentInfo = lastHeaderValue?.LastOrDefault();
             if (string.IsNullOrEmpty(attachmentInfo))
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Unable to get the attachment string");
+                return await bot.SendTextMessageAsync(msg.Chat, "Unable to get the attachment string",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
             const string pattern = """filename="?(.+?)"?;""";
@@ -164,7 +183,8 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             }
             else
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Filename not found");
+                return await bot.SendTextMessageAsync(msg.Chat, "Filename not found",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
             
             if (IsValidFilename(filename) == false)
@@ -186,18 +206,34 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             
             if (sizeInMegabytes < 49)
             {
-                await using (var voiceStream = File.OpenRead(audioFilePath))
+                switch (mode)
                 {
-                    await bot.SendVoiceAsync(msg.Chat,
-                        InputFile.FromStream(voiceStream, Path.GetFileName(audioFilePath)),
-                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                }
-
-                await using (var audioStream = File.OpenRead(audioFilePath))
-                {
-                    return await bot.SendAudioAsync(msg.Chat,
-                        InputFile.FromStream(audioStream, Path.GetFileName(audioFilePath)),
-                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+                    case AudioMode.Voice:
+                    {
+                        await using var voiceStream = File.OpenRead(audioFilePath);
+                        return await bot.SendVoiceAsync(msg.Chat,
+                            InputFile.FromStream(voiceStream, Path.GetFileName(audioFilePath)),
+                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+                    }
+                    case AudioMode.Audio:
+                    {
+                        await using var audioStream = File.OpenRead(audioFilePath);
+                        return await bot.SendAudioAsync(msg.Chat,
+                            InputFile.FromStream(audioStream, Path.GetFileName(audioFilePath)),
+                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+                    }
+                    case AudioMode.Both:
+                    default:
+                    {
+                        await using var voiceStream = File.OpenRead(audioFilePath);
+                        await bot.SendVoiceAsync(msg.Chat,
+                            InputFile.FromStream(voiceStream, Path.GetFileName(audioFilePath)),
+                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+                        await using var audioStream = File.OpenRead(audioFilePath);
+                        return await bot.SendAudioAsync(msg.Chat,
+                            InputFile.FromStream(audioStream, Path.GetFileName(audioFilePath)),
+                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+                    }
                 }
             }
             else
@@ -207,7 +243,8 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                 if (fileSharingEndpointHealthUrl == null)
                 {
                     return await bot.SendTextMessageAsync(msg.Chat,
-                        "Unable to determine the health status of the file sharing endpoint");
+                        "Unable to determine the health status of the file sharing endpoint",
+                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
                 }
                 
                 var uploadEndHealthRequest = new HttpRequestMessage
@@ -219,7 +256,8 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                 using var uploadEndHealthResponse = await httpClient.SendAsync(uploadEndHealthRequest);
                 if (uploadEndHealthResponse.IsSuccessStatusCode == false)
                 {
-                    return await bot.SendTextMessageAsync(msg.Chat, "File sharing endpoint is down");
+                    return await bot.SendTextMessageAsync(msg.Chat, "File sharing endpoint is down",
+                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
                 }
                 
                 if (authData.ShouldRefreshToken())
@@ -229,13 +267,15 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                 
                 if (authData == null)
                 {
-                    return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot");
+                    return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
+                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
                 }
 
                 var fileSharingEndpointUrl = configuration["Urls:FileSharingEndpoint"];
                 if (fileSharingEndpointUrl == null)
                 {
-                    return await bot.SendTextMessageAsync(msg.Chat, "Unable to get the file sharing endpoint url");
+                    return await bot.SendTextMessageAsync(msg.Chat, "Unable to get the file sharing endpoint url",
+                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
                 }
                 
                 var uploadFileRequest = new HttpRequestMessage
@@ -259,24 +299,29 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                 if (uploadFileResponse.IsSuccessStatusCode == false)
                 {
                     return await bot.SendTextMessageAsync(msg.Chat,
-                        $"Unable to upload the audio file to file sharing server. StatusCode: {uploadFileResponse.StatusCode}");
+                        $"Unable to upload the audio file to file sharing server. StatusCode: {uploadFileResponse.StatusCode}",
+                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
                 }
                 
                 var uploadResultStr = await uploadFileResponse.Content.ReadAsStringAsync();
                 if (string.IsNullOrEmpty(uploadResultStr))
                 {
                     return await bot.SendTextMessageAsync(msg.Chat,
-                        "Unable to get upload data from file sharing server");
+                        "Unable to get upload data from file sharing server",
+                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
                 }
                 
                 var uploadData = JsonSerializer.Deserialize<UploadData>(uploadResultStr);
                 if (uploadData == null)
                 {
                     return await bot.SendTextMessageAsync(msg.Chat,
-                        "Unable to get upload data from file sharing server");
+                        "Unable to get upload data from file sharing server",
+                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
                 }
 
-                return await bot.SendTextMessageAsync(msg.Chat, uploadData.FileUrl);
+                return await bot.SendTextMessageAsync(msg.Chat, $"<a href=\"{uploadData.FileUrl}\">Audio link</a>",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId },
+                    parseMode: ParseMode.Html);
             }
         }
         finally
@@ -329,99 +374,41 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
 
     private bool IsValidFilename(string testName)
     {
-        var strTheseAreInvalidFileNameChars = new string(System.IO.Path.GetInvalidFileNameChars()); 
+        var strTheseAreInvalidFileNameChars = new string(Path.GetInvalidFileNameChars()); 
         var regInvalidFileName = new Regex("[" + Regex.Escape(strTheseAreInvalidFileNameChars) + "]");
  
-        if (regInvalidFileName.IsMatch(testName)) { return false; };
- 
+        if (regInvalidFileName.IsMatch(testName)) { return false; }
+
         return true;
-    }
-
-    private async Task<Message> Usage(Message msg)
-    {
-        const string usage = """
-                <b><u>Bot menu</u></b>:
-                /photo          - send a photo
-                /inline_buttons - send inline buttons
-                /keyboard       - send keyboard buttons
-                /remove         - remove keyboard buttons
-                /request        - request location or contact
-                /inline_mode    - send inline-mode results list
-                /poll           - send a poll
-                /poll_anonymous - send an anonymous poll
-                /throw          - what happens if handler fails
-            """;
-        return await bot.SendTextMessageAsync(msg.Chat, usage, parseMode: ParseMode.Html, replyMarkup: new ReplyKeyboardRemove());
-    }
-
-    private async Task<Message> SendPhoto(Message msg)
-    {
-        await bot.SendChatActionAsync(msg.Chat, ChatAction.UploadPhoto);
-        await Task.Delay(2000); // simulate a long task
-        await using var fileStream = new FileStream("Files/bot.gif", FileMode.Open, FileAccess.Read);
-        return await bot.SendPhotoAsync(msg.Chat, fileStream, caption: "Read https://telegrambots.github.io/book/");
-    }
-
-    // Send inline keyboard. You can process responses in OnCallbackQuery handler
-    private async Task<Message> SendInlineKeyboard(Message msg)
-    {
-        var inlineMarkup = new InlineKeyboardMarkup()
-            .AddNewRow("1.1", "1.2", "1.3")
-            .AddNewRow()
-                .AddButton("WithCallbackData", "CallbackData")
-                .AddButton(InlineKeyboardButton.WithUrl("WithUrl", "https://github.com/TelegramBots/Telegram.Bot"));
-        return await bot.SendTextMessageAsync(msg.Chat, "Inline buttons:", replyMarkup: inlineMarkup);
-    }
-
-    private async Task<Message> SendReplyKeyboard(Message msg)
-    {
-        var replyMarkup = new ReplyKeyboardMarkup(true)
-            .AddNewRow("1.1", "1.2", "1.3")
-            .AddNewRow().AddButton("2.1").AddButton("2.2");
-        return await bot.SendTextMessageAsync(msg.Chat, "Keyboard buttons:", replyMarkup: replyMarkup);
-    }
-
-    private async Task<Message> RemoveKeyboard(Message msg)
-    {
-        return await bot.SendTextMessageAsync(msg.Chat, "Removing keyboard", replyMarkup: new ReplyKeyboardRemove());
-    }
-
-    private async Task<Message> RequestContactAndLocation(Message msg)
-    {
-        var replyMarkup = new ReplyKeyboardMarkup(true)
-            .AddButton(KeyboardButton.WithRequestLocation("Location"))
-            .AddButton(KeyboardButton.WithRequestContact("Contact"));
-        return await bot.SendTextMessageAsync(msg.Chat, "Who or Where are you?", replyMarkup: replyMarkup);
-    }
-
-    private async Task<Message> StartInlineQuery(Message msg)
-    {
-        var button = InlineKeyboardButton.WithSwitchInlineQueryCurrentChat("Inline Mode");
-        return await bot.SendTextMessageAsync(msg.Chat, "Press the button to start Inline Query\n\n" +
-            "(Make sure you enabled Inline Mode in @BotFather)", replyMarkup: new InlineKeyboardMarkup(button));
-    }
-
-    private async Task<Message> SendPoll(Message msg)
-    {
-        return await bot.SendPollAsync(msg.Chat, "Question", PollOptions, isAnonymous: false);
-    }
-
-    private async Task<Message> SendAnonymousPoll(Message msg)
-    {
-        return await bot.SendPollAsync(chatId: msg.Chat, "Question", PollOptions);
-    }
-
-    private static Task<Message> FailingHandler(Message msg)
-    {
-        throw new NotImplementedException("FailingHandler");
     }
 
     // Process Inline Keyboard callback data
     private async Task OnCallbackQuery(CallbackQuery callbackQuery)
     {
         logger.LogInformation("Received inline keyboard callback from: {CallbackQueryId}", callbackQuery.Id);
-        await bot.AnswerCallbackQueryAsync(callbackQuery.Id, $"Received {callbackQuery.Data}");
-        await bot.SendTextMessageAsync(callbackQuery.Message!.Chat, $"Received {callbackQuery.Data}");
+
+        var data = callbackQuery.Data;
+        var message = callbackQuery.Message;
+        if (message == null)
+        {
+            return;
+        }
+
+        var chat = message.Chat;
+        if (data == null)
+        {
+            return;
+        }
+
+        _inMemorySettings[chat.Id] = data switch
+        {
+            "Voice" => AudioMode.Voice,
+            "Audio" => AudioMode.Audio,
+            "Both" => AudioMode.Both,
+            _ => AudioMode.Both
+        };
+
+        await bot.SendTextMessageAsync(message.Chat, $"Selected message mode: {data}");
     }
 
     #region Inline Mode
@@ -464,49 +451,4 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
         logger.LogInformation("Unknown update type: {UpdateType}", update.Type);
         return Task.CompletedTask;
     }
-}
-
-public class AuthData
-{
-    [JsonPropertyName("access_token")]
-    public string AccessToken { get; set; }
-
-    [JsonPropertyName("expires_in")]
-    public int ExpiresIn { get; set; }
-
-    [JsonPropertyName("refresh_expires_in")]
-    public int RefreshExpiresIn { get; set; }
-
-    [JsonPropertyName("token_type")]
-    public string TokenType { get; set; }
-
-    [JsonPropertyName("not-before-policy")]
-    public int NotBeforePolicy { get; set; }
-
-    [JsonPropertyName("scope")]
-    public string Scope { get; set; }
-    
-    [JsonIgnore]
-    public DateTime ExpirationTime { get; private set; }
-
-    public void SetExpirationTime()
-    {
-        ExpirationTime = DateTime.UtcNow.AddSeconds(ExpiresIn);
-    }
-
-    public bool IsTokenValid()
-    {
-        return DateTime.UtcNow < ExpirationTime;
-    }
-
-    public bool ShouldRefreshToken(int refreshThresholdSeconds = 30)
-    {
-        return DateTime.UtcNow.AddSeconds(refreshThresholdSeconds) >= ExpirationTime;
-    }
-}
-
-public class UploadData
-{
-    [JsonPropertyName("fileUrl")]
-    public string FileUrl { get; set; }
 }
