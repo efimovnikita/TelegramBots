@@ -1,6 +1,5 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Bot.ListenYoutube.Models;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
@@ -60,7 +59,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
     {
         var inlineMarkup = new InlineKeyboardMarkup()
             .AddNewRow("Both", "Voice", "Audio");
-        return await bot.SendTextMessageAsync(msg.Chat, "Inline buttons:", replyMarkup: inlineMarkup);
+        return await bot.SendTextMessageAsync(msg.Chat, "Select the message mode:", replyMarkup: inlineMarkup);
     }
 
     private async Task<Message> DefaultBehaviour(Message msg)
@@ -164,35 +163,8 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                 return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
-
-            var (_, lastHeaderValue) = audioResponse.Content.Headers.LastOrDefault();
-            var attachmentInfo = lastHeaderValue?.LastOrDefault();
-            if (string.IsNullOrEmpty(attachmentInfo))
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Unable to get the attachment string",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            const string pattern = """filename="?(.+?)"?;""";
-            var match = Regex.Match(attachmentInfo, pattern);
-
-            string filename;
-            if (match.Success)
-            {
-                filename = match.Groups[1].Value;
-            }
-            else
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Filename not found",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
             
-            if (IsValidFilename(filename) == false)
-            {
-                // invalid name
-                var extension = Path.GetExtension(filename);
-                filename = $"{Guid.NewGuid()}{extension}";
-            }
+            var filename = $"{Guid.NewGuid()}.mp3";
 
             audioFilePath = Path.Combine(Path.GetTempPath(), filename);
             await using (FileStream fileStream = new(audioFilePath, FileMode.Create, FileAccess.Write))
@@ -370,16 +342,6 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             logger.LogError(e, "Error while getting the auth data");
             return null;
         }
-    }
-
-    private bool IsValidFilename(string testName)
-    {
-        var strTheseAreInvalidFileNameChars = new string(Path.GetInvalidFileNameChars()); 
-        var regInvalidFileName = new Regex("[" + Regex.Escape(strTheseAreInvalidFileNameChars) + "]");
- 
-        if (regInvalidFileName.IsMatch(testName)) { return false; }
-
-        return true;
     }
 
     // Process Inline Keyboard callback data
