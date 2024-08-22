@@ -251,7 +251,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                 var content = new MultipartFormDataContent();
                 var fileBytes = await File.ReadAllBytesAsync(audioFilePath);
                 var fileContent = new ByteArrayContent(fileBytes);
-                fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("audio/mpeg");
+                fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data");
                 content.Add(fileContent, "file", Path.GetFileName(audioFilePath));
                 uploadFileRequest.Content = content;
                 
