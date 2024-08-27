@@ -2,6 +2,8 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.ListenYoutube", "Bot.ListenYoutube\Bot.ListenYoutube.csproj", "{45815BCE-0D4C-4534-846C-3CBD86A7BE60}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.EngTubeBot", "Bot.EngTubeBot\Bot.EngTubeBot.csproj", "{EF123B54-D0F5-4C0C-8D5C-046ACC3D446C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -12,5 +14,9 @@ Global
 		{45815BCE-0D4C-4534-846C-3CBD86A7BE60}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{45815BCE-0D4C-4534-846C-3CBD86A7BE60}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{45815BCE-0D4C-4534-846C-3CBD86A7BE60}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EF123B54-D0F5-4C0C-8D5C-046ACC3D446C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EF123B54-D0F5-4C0C-8D5C-046ACC3D446C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EF123B54-D0F5-4C0C-8D5C-046ACC3D446C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EF123B54-D0F5-4C0C-8D5C-046ACC3D446C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
