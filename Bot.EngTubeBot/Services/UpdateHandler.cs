@@ -17,7 +17,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
 {
     private readonly Dictionary<long, UserSettings> _inMemorySettings = [];
     private static readonly TimeSpan WaitInterval = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan MaxWaitTime = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan MaxWaitTime = TimeSpan.FromMinutes(10);
     
     public async Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, HandleErrorSource source, CancellationToken cancellationToken)
     {
@@ -313,7 +313,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             await Task.Delay(WaitInterval);
         }
 
-        return await bot.SendTextMessageAsync(msg.Chat, "Translation job did not succeed within the allowed time",
+        return await bot.SendTextMessageAsync(msg.Chat, $"Translation job did not succeed within the allowed time. The job id: {jobId}",
             replyParameters: new ReplyParameters { MessageId = msg.MessageId });
     }
 
