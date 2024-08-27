@@ -58,7 +58,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
     private async Task<Message> SendInlineModeKeyboard(Message msg)
     {
         var inlineMarkup = new InlineKeyboardMarkup()
-            .AddNewRow("Both", "Voice", "Audio");
+            .AddNewRow("Both", "Voice", "Audio", "Link");
         return await bot.SendTextMessageAsync(msg.Chat, "Select the message mode:", replyMarkup: inlineMarkup);
     }
 
@@ -194,6 +194,10 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                             InputFile.FromStream(audioStream, Path.GetFileName(audioFilePath)),
                             replyParameters: new ReplyParameters { MessageId = msg.MessageId });
                     }
+                    case AudioMode.Link:
+                    {
+                        return await UploadFileToFileSharingServer(msg, httpClient, authData, authServer, clientId, clientSecret, audioFilePath);
+                    }
                     case AudioMode.Both:
                     default:
                     {
@@ -210,90 +214,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             }
             else
             {
-                // we need to upload the huge file to remote server and get the download link, but before doing that we need to check the endpoint health and to check our auth token
-                var fileSharingEndpointHealthUrl = configuration["Urls:FileSharingEndpointHealth"];
-                if (fileSharingEndpointHealthUrl == null)
-                {
-                    return await bot.SendTextMessageAsync(msg.Chat,
-                        "Unable to determine the health status of the file sharing endpoint",
-                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                }
-                
-                var uploadEndHealthRequest = new HttpRequestMessage
-                {
-                    Method = HttpMethod.Get,
-                    RequestUri = new Uri(fileSharingEndpointHealthUrl),
-                };
-                
-                using var uploadEndHealthResponse = await httpClient.SendAsync(uploadEndHealthRequest);
-                if (uploadEndHealthResponse.IsSuccessStatusCode == false)
-                {
-                    return await bot.SendTextMessageAsync(msg.Chat, "File sharing endpoint is down",
-                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                }
-                
-                if (authData.ShouldRefreshToken())
-                {
-                    authData = await GetAuthData(httpClient, authServer, clientId, clientSecret);
-                }
-                
-                if (authData == null)
-                {
-                    return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
-                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                }
-
-                var fileSharingEndpointUrl = configuration["Urls:FileSharingEndpoint"];
-                if (fileSharingEndpointUrl == null)
-                {
-                    return await bot.SendTextMessageAsync(msg.Chat, "Unable to get the file sharing endpoint url",
-                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                }
-                
-                var uploadFileRequest = new HttpRequestMessage
-                {
-                    Method = HttpMethod.Post,
-                    RequestUri = new Uri(fileSharingEndpointUrl),
-                    Headers =
-                    {
-                        { "Authorization", $"Bearer {authData.AccessToken}" },
-                    },
-                };
-
-                var content = new MultipartFormDataContent();
-                var fileBytes = await File.ReadAllBytesAsync(audioFilePath);
-                var fileContent = new ByteArrayContent(fileBytes);
-                fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data");
-                content.Add(fileContent, "file", Path.GetFileName(audioFilePath));
-                uploadFileRequest.Content = content;
-                
-                using var uploadFileResponse = await httpClient.SendAsync(uploadFileRequest);
-                if (uploadFileResponse.IsSuccessStatusCode == false)
-                {
-                    return await bot.SendTextMessageAsync(msg.Chat,
-                        $"Unable to upload the audio file to file sharing server. StatusCode: {uploadFileResponse.StatusCode}",
-                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                }
-                
-                var uploadResultStr = await uploadFileResponse.Content.ReadAsStringAsync();
-                if (string.IsNullOrEmpty(uploadResultStr))
-                {
-                    return await bot.SendTextMessageAsync(msg.Chat,
-                        "Unable to get upload data from file sharing server",
-                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                }
-                
-                var uploadData = JsonSerializer.Deserialize<UploadData>(uploadResultStr);
-                if (uploadData == null)
-                {
-                    return await bot.SendTextMessageAsync(msg.Chat,
-                        "Unable to get upload data from file sharing server",
-                        replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                }
-
-                return await bot.SendTextMessageAsync(msg.Chat, $"<a href=\"{uploadData.FileUrl}\">Audio link</a>",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId },
-                    parseMode: ParseMode.Html);
+                return await UploadFileToFileSharingServer(msg, httpClient, authData, authServer, clientId, clientSecret, audioFilePath);
             }
         }
         finally
@@ -304,6 +225,101 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                 logger.LogInformation("The file '{Path}' was deleted", audioFilePath);
             }
         }
+    }
+
+    private async Task<Message> UploadFileToFileSharingServer(Message msg, HttpClient httpClient, AuthData? authData,
+        string authServer, string clientId, string clientSecret, string audioFilePath)
+    {
+        // we need to upload the huge file to remote server and get the download link, but before doing that we need to check the endpoint health and to check our auth token
+        var fileSharingEndpointHealthUrl = configuration["Urls:FileSharingEndpointHealth"];
+        if (fileSharingEndpointHealthUrl == null)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat,
+                "Unable to determine the health status of the file sharing endpoint",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+                
+        var uploadEndHealthRequest = new HttpRequestMessage
+        {
+            Method = HttpMethod.Get,
+            RequestUri = new Uri(fileSharingEndpointHealthUrl),
+        };
+                
+        using var uploadEndHealthResponse = await httpClient.SendAsync(uploadEndHealthRequest);
+        if (uploadEndHealthResponse.IsSuccessStatusCode == false)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "File sharing endpoint is down",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+        
+        if (authData == null)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+                
+        if (authData.ShouldRefreshToken())
+        {
+            authData = await GetAuthData(httpClient, authServer, clientId, clientSecret);
+        }
+                
+        if (authData == null)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        var fileSharingEndpointUrl = configuration["Urls:FileSharingEndpoint"];
+        if (fileSharingEndpointUrl == null)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "Unable to get the file sharing endpoint url",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+                
+        var uploadFileRequest = new HttpRequestMessage
+        {
+            Method = HttpMethod.Post,
+            RequestUri = new Uri(fileSharingEndpointUrl),
+            Headers =
+            {
+                { "Authorization", $"Bearer {authData.AccessToken}" },
+            },
+        };
+
+        var content = new MultipartFormDataContent();
+        var fileBytes = await File.ReadAllBytesAsync(audioFilePath);
+        var fileContent = new ByteArrayContent(fileBytes);
+        fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data");
+        content.Add(fileContent, "file", Path.GetFileName(audioFilePath));
+        uploadFileRequest.Content = content;
+                
+        using var uploadFileResponse = await httpClient.SendAsync(uploadFileRequest);
+        if (uploadFileResponse.IsSuccessStatusCode == false)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat,
+                $"Unable to upload the audio file to file sharing server. StatusCode: {uploadFileResponse.StatusCode}",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+                
+        var uploadResultStr = await uploadFileResponse.Content.ReadAsStringAsync();
+        if (string.IsNullOrEmpty(uploadResultStr))
+        {
+            return await bot.SendTextMessageAsync(msg.Chat,
+                "Unable to get upload data from file sharing server",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+                
+        var uploadData = JsonSerializer.Deserialize<UploadData>(uploadResultStr);
+        if (uploadData == null)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat,
+                "Unable to get upload data from file sharing server",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        return await bot.SendTextMessageAsync(msg.Chat, $"<a href=\"{uploadData.FileUrl}\">Audio link</a>",
+            replyParameters: new ReplyParameters { MessageId = msg.MessageId },
+            parseMode: ParseMode.Html);
     }
 
     private async Task<AuthData?> GetAuthData(HttpClient httpClient, string authServer, string clientId,
@@ -367,6 +383,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             "Voice" => AudioMode.Voice,
             "Audio" => AudioMode.Audio,
             "Both" => AudioMode.Both,
+            "Link" => AudioMode.Link,
             _ => AudioMode.Both
         };
 

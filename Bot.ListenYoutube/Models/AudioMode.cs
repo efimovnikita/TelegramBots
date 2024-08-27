@@ -4,5 +4,6 @@ public enum AudioMode
 {
     Both,
     Voice,
-    Audio
+    Audio,
+    Link
 }
