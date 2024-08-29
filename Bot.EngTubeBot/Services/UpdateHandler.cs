@@ -9,6 +9,7 @@ using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.InlineQueryResults;
+using Exception = System.Exception;
 using File = System.IO.File;
 
 namespace Bot.EngTubeBot.Services;
@@ -43,17 +44,111 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
 
     private async Task OnMessage(Message msg)
     {
-        logger.LogInformation("Receive message type: {MessageType}", msg.Type);
-        if (msg.Text is not { } messageText)
-            return;
-
-        var sentMessage = await (messageText.Split(' ')[0] switch
+        var messageType = msg.Type;
+        logger.LogInformation("Receive message type: {MessageType}", messageType);
+        if (messageType == MessageType.Text)
         {
-            "/key" => SetKey(msg),
-            "/prompt" => SetPrompt(msg),
-            _ => DefaultBehaviour(msg)
-        });
-        logger.LogInformation("The message was sent with id: {SentMessageId}", sentMessage.MessageId);
+            if (msg.Text is not { } messageText)
+                return;
+
+            var sentMessage = await (messageText.Split(' ')[0] switch
+            {
+                "/key" => SetKey(msg),
+                "/prompt" => SetPrompt(msg),
+                _ => DefaultBehaviour(msg)
+            });
+            
+            logger.LogInformation("The message was sent with id: {SentMessageId}", sentMessage.MessageId);
+        }
+        
+        if (messageType == MessageType.Audio)
+        {
+            var messageAudio = msg.Audio;
+            if (messageAudio == null)
+                return;
+
+            var sentMessage = await DefaultAudioBehaviour(msg);
+            
+            logger.LogInformation("The message was sent with id: {SentMessageId}", sentMessage.MessageId);
+        }
+    }
+
+    private async Task<Message> DefaultAudioBehaviour(Message msg)
+    {
+        var waitingMessage = await bot.SendTextMessageAsync(msg.Chat, "\u23f3");
+
+        try
+        {
+            // first of all wee need to get settings from memory storage
+            var getSettingsResult = _inMemorySettings.TryGetValue(msg.Chat.Id, out var settings);
+            if (getSettingsResult == false)
+            {
+                var userSettings = new UserSettings("", "");
+                _inMemorySettings.Add(msg.Chat.Id, userSettings);
+
+                return await bot.SendTextMessageAsync(msg.Chat, "You need to setup your OpenAI API key",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+
+            var msgAudio = msg.Audio;
+
+            if (msgAudio == null)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat, "The audio message is empty",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+
+            Telegram.Bot.Types.File file = await bot.GetFileAsync(msgAudio.FileId);
+
+            if (file.FileSize == null)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat, "Unable to determine the file size",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+
+            var sizeInMegabytes = (double)file.FileSize / (1024 * 1024);
+            if (sizeInMegabytes > 19)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat, "The audio file is too big",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+
+            if (file.FilePath == null)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat, "Unable to determine the file path",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+
+            var filePath = GetFilePath();
+            await using (FileStream fileStream = File.OpenWrite(filePath))
+            {
+                await bot.DownloadFileAsync(file.FilePath, fileStream);
+            }
+
+            if (File.Exists(filePath) == false)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat, "Error while saving the file",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+
+            var fileInfo = new FileInfo(filePath);
+            if (fileInfo.Length == 0)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat, "Error while saving the file",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+
+            return await SendToCloudAndGetTranslation(msg, clientFactory.CreateClient(), filePath, settings);
+        }
+        catch (Exception ex)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, ex.GetType() + "\n" + ex.Message,
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+        finally
+        {
+            await bot.DeleteMessageAsync(msg.Chat, waitingMessage.MessageId);
+        }
     }
 
     private async Task<Message> SetPrompt(Message msg)
@@ -373,130 +468,161 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
-            if (downloadResult.data is { Length: 0 })
+            var bytes = downloadResult.data;
+            
+            if (bytes == null)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat, "File is empty",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+
+            if (bytes is { Length: 0 })
             {
                 return await bot.SendTextMessageAsync(msg.Chat, "File is empty",
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
             // first of all - save the file
-            var uniqueFileName = Guid.NewGuid() + ".mp3";
-            var filePath = Path.Combine(Path.GetTempPath(), uniqueFileName);
-            logger.LogInformation("File will be saved as: {filePath}", filePath);
+            var filePath = await SaveBytesToFile(bytes);
 
-            await using (var fileStream = new FileStream(filePath, FileMode.Create))
-            {
-                await fileStream.WriteAsync(downloadResult.data!, 0, downloadResult.data!.Length);
-                logger.LogInformation("File copy completed");
-            }
-
-            var healthUrl = configuration["Urls:AudioEndpointHealth"];
-            if (healthUrl == null)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat,
-                    "Unable to check the fact that the main endpoint is healthy",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var healthRequest = new HttpRequestMessage
-            {
-                Method = HttpMethod.Get,
-                RequestUri = new Uri(healthUrl),
-            };
-            using var healthResponse = await httpClient.SendAsync(healthRequest);
-            if (healthResponse.IsSuccessStatusCode == false)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Audio microservice is unhealthy",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var authServer = configuration["Urls:AuthServer"];
-            var clientId = configuration["BotConfiguration:ClientId"];
-            var clientSecret = configuration["BotConfiguration:ClientSecret"];
-
-            if ((authServer != null && clientId != null && clientSecret != null) == false)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var authData = await GetAuthData(httpClient, authServer, clientId, clientSecret);
-            if (authData == null)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var audioEndpointUrl = configuration["Urls:AudioEndpoint"];
-            if (audioEndpointUrl == null)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat,
-                    "Unable to send the request to audio endpoint. Provide url to the endpoint",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var translationRequest = new HttpRequestMessage
-            {
-                Method = HttpMethod.Post,
-                RequestUri = new Uri(audioEndpointUrl),
-                Headers =
-                {
-                    { "Authorization", $"Bearer {authData.AccessToken}" }
-                }
-            };
-
-            var content = new MultipartFormDataContent();
-            var fileBytes = await File.ReadAllBytesAsync(filePath);
-            var fileContent = new ByteArrayContent(fileBytes);
-            fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data");
-            content.Add(fileContent, "audioFile", Path.GetFileName(filePath));
-            content.Add(new StringContent(settings?.Prompt ?? ""), "prompt");
-            content.Add(new StringContent(settings?.Key ?? ""), "openaiApiKey");
-            translationRequest.Content = content;
-
-            using var translationResponse = await httpClient.SendAsync(translationRequest);
-            if (translationResponse.IsSuccessStatusCode == false)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var translationResponseStr = await translationResponse.Content.ReadAsStringAsync();
-            if (string.IsNullOrEmpty(translationResponseStr))
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var translationResponseData = JsonSerializer.Deserialize<TranslationResponseData>(translationResponseStr);
-            if (translationResponseData == null)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var jobId = translationResponseData.JobId;
-            if (string.IsNullOrWhiteSpace(jobId))
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var audioStatusEndpointUrl = configuration["Urls:AudioStatusEndpoint"];
-            if (audioStatusEndpointUrl == null)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat,
-                    "Unable to send the status request to audio endpoint. Provide url to the endpoint",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            return await CheckTranslationStatusAsync(httpClient, audioStatusEndpointUrl, jobId, msg, authData,
-                authServer, clientId, clientSecret);
+            return await SendToCloudAndGetTranslation(msg, httpClient, filePath, settings);
+        }
+        catch (Exception ex)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, ex.GetType() + "\n" + ex.Message,
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
         }
         finally
         {
             await bot.DeleteMessageAsync(msg.Chat, waitingMessage.MessageId);
         }
+    }
+
+    private async Task<Message> SendToCloudAndGetTranslation(Message msg, HttpClient httpClient, string filePath, UserSettings? settings)
+    {
+        var healthUrl = configuration["Urls:AudioEndpointHealth"];
+        if (healthUrl == null)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat,
+                "Unable to check the fact that the main endpoint is healthy",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        var healthRequest = new HttpRequestMessage
+        {
+            Method = HttpMethod.Get,
+            RequestUri = new Uri(healthUrl),
+        };
+        using var healthResponse = await httpClient.SendAsync(healthRequest);
+        if (healthResponse.IsSuccessStatusCode == false)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "Audio microservice is unhealthy",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        var authServer = configuration["Urls:AuthServer"];
+        var clientId = configuration["BotConfiguration:ClientId"];
+        var clientSecret = configuration["BotConfiguration:ClientSecret"];
+
+        if ((authServer != null && clientId != null && clientSecret != null) == false)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        var authData = await GetAuthData(httpClient, authServer, clientId, clientSecret);
+        if (authData == null)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        var audioEndpointUrl = configuration["Urls:AudioEndpoint"];
+        if (audioEndpointUrl == null)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat,
+                "Unable to send the request to audio endpoint. Provide url to the endpoint",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        var translationRequest = new HttpRequestMessage
+        {
+            Method = HttpMethod.Post,
+            RequestUri = new Uri(audioEndpointUrl),
+            Headers =
+            {
+                { "Authorization", $"Bearer {authData.AccessToken}" }
+            }
+        };
+
+        var content = new MultipartFormDataContent();
+        var fileBytes = await File.ReadAllBytesAsync(filePath);
+        var fileContent = new ByteArrayContent(fileBytes);
+        fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data");
+        content.Add(fileContent, "audioFile", Path.GetFileName(filePath));
+        content.Add(new StringContent(settings?.Prompt ?? ""), "prompt");
+        content.Add(new StringContent(settings?.Key ?? ""), "openaiApiKey");
+        translationRequest.Content = content;
+
+        using var translationResponse = await httpClient.SendAsync(translationRequest);
+        if (translationResponse.IsSuccessStatusCode == false)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        var translationResponseStr = await translationResponse.Content.ReadAsStringAsync();
+        if (string.IsNullOrEmpty(translationResponseStr))
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        var translationResponseData = JsonSerializer.Deserialize<TranslationResponseData>(translationResponseStr);
+        if (translationResponseData == null)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        var jobId = translationResponseData.JobId;
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        var audioStatusEndpointUrl = configuration["Urls:AudioStatusEndpoint"];
+        if (audioStatusEndpointUrl == null)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat,
+                "Unable to send the status request to audio endpoint. Provide url to the endpoint",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+
+        return await CheckTranslationStatusAsync(httpClient, audioStatusEndpointUrl, jobId, msg, authData,
+            authServer, clientId, clientSecret);
+    }
+
+    private async Task<string> SaveBytesToFile(byte[] bytes)
+    {
+        var filePath = GetFilePath();
+        logger.LogInformation("File will be saved as: {filePath}", filePath);
+
+        await using (var fileStream = new FileStream(filePath, FileMode.Create))
+        {
+            await fileStream.WriteAsync(bytes, 0, bytes.Length);
+            logger.LogInformation("File copy completed");
+        }
+
+        return filePath;
+    }
+
+    private static string GetFilePath()
+    {
+        var uniqueFileName = Guid.NewGuid() + ".mp3";
+        var filePath = Path.Combine(Path.GetTempPath(), uniqueFileName);
+        return filePath;
     }
 
     private async Task<AuthData?> GetAuthData(HttpClient httpClient, string authServer, string clientId,
