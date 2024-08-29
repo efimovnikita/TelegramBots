@@ -69,16 +69,16 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             logger.LogInformation("The message was sent with id: {SentMessageId}", sentMessage.MessageId);
         }
         
-        // if (messageType == MessageType.Audio)
-        // {
-        //     var messageAudio = msg.Audio;
-        //     if (messageAudio == null)
-        //         return;
-        //
-        //     var sentMessage = await DefaultAudioBehaviour(msg);
-        //     
-        //     logger.LogInformation("The message was sent with id: {SentMessageId}", sentMessage.MessageId);
-        // }
+        if (messageType == MessageType.Document)
+        {
+            var msgDocument = msg.Document;
+            if (msgDocument == null)
+                return;
+        
+            var sentMessage = await DefaultDocumentBehaviour(msg);
+            
+            logger.LogInformation("The message was sent with id: {SentMessageId}", sentMessage.MessageId);
+        }
     }
 
     private async Task<Message> SetAnthropicKey(Message msg)
@@ -110,7 +110,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             replyParameters: new ReplyParameters { MessageId = msg.MessageId });
     }
 
-    /*private async Task<Message> DefaultAudioBehaviour(Message msg)
+    private async Task<Message> DefaultDocumentBehaviour(Message msg)
     {
         var waitingMessage = await bot.SendTextMessageAsync(msg.Chat, "\u23f3");
 
@@ -120,22 +120,22 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             var getSettingsResult = _inMemorySettings.TryGetValue(msg.Chat.Id, out var settings);
             if (getSettingsResult == false)
             {
-                var userSettings = new UserSettings("", "");
+                var userSettings = GetDefaultUserSettings();
                 _inMemorySettings.Add(msg.Chat.Id, userSettings);
 
-                return await bot.SendTextMessageAsync(msg.Chat, "You need to setup your OpenAI API key",
+                return await bot.SendTextMessageAsync(msg.Chat, "You need to setup your OpenAI API key and Anthropic API key",
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
-            var msgAudio = msg.Audio;
+            var msgDocument = msg.Document;
 
-            if (msgAudio == null)
+            if (msgDocument == null)
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "The audio message is empty",
+                return await bot.SendTextMessageAsync(msg.Chat, "The document message is empty",
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
-            Telegram.Bot.Types.File file = await bot.GetFileAsync(msgAudio.FileId);
+            Telegram.Bot.Types.File file = await bot.GetFileAsync(msgDocument.FileId);
 
             if (file.FileSize == null)
             {
@@ -146,7 +146,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             var sizeInMegabytes = (double)file.FileSize / (1024 * 1024);
             if (sizeInMegabytes > 19)
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "The audio file is too big",
+                return await bot.SendTextMessageAsync(msg.Chat, "The file is too big",
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
@@ -156,8 +156,15 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
+            var extension = Path.GetExtension(file.FilePath);
+            if (extension.Equals(".txt", StringComparison.OrdinalIgnoreCase) == false)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat, "We are working only with TXT files",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+
             var filePath = GetFilePath();
-            await using (FileStream fileStream = File.OpenWrite(filePath))
+            await using (var fileStream = File.OpenWrite(filePath))
             {
                 await bot.DownloadFileAsync(file.FilePath, fileStream);
             }
@@ -175,7 +182,41 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
-            return await SendToCloudAndGetTranscription(msg, clientFactory.CreateClient(), filePath, settings);
+            var text = await File.ReadAllTextAsync(filePath);
+
+            // now we should make the request to the claude endpoint
+            var httpClient = clientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromMinutes(5);
+
+            var summary = await GetSummaryFromClaude(
+                httpClient: httpClient,
+                text: text,
+                settings: settings);
+            
+            if (summary.Length <= 4000)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat, summary,
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+
+            var authServer = configuration["Urls:AuthServer"];
+            var clientId = configuration["BotConfiguration:ClientId"];
+            var clientSecret = configuration["BotConfiguration:ClientSecret"];
+
+            if ((authServer != null && clientId != null && clientSecret != null) == false)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+
+            var authData = await GetAuthData(httpClient, authServer, clientId, clientSecret);
+            if (authData == null)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
+                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+            }
+                
+            return await UploadContentHtmlAndGetLink(httpClient, msg, authData, authServer, clientId, clientSecret, summary);
         }
         catch (Exception ex)
         {
@@ -186,7 +227,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
         {
             await bot.DeleteMessageAsync(msg.Chat, waitingMessage.MessageId);
         }
-    }*/
+    }
 
     private async Task<Message> SetPrompt(Message msg)
     {
@@ -773,34 +814,6 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             return null;
         }
     }
-
-    /*private async Task OnCallbackQuery(CallbackQuery callbackQuery)
-    {
-        logger.LogInformation("Received inline keyboard callback from: {CallbackQueryId}", callbackQuery.Id);
-
-        var data = callbackQuery.Data;
-        var message = callbackQuery.Message;
-        if (message == null)
-        {
-            return;
-        }
-
-        var chat = message.Chat;
-        if (data == null)
-        {
-            return;
-        }
-
-        _inMemorySettings[chat.Id] = data switch
-        {
-            "Voice" => AudioMode.Voice,
-            "Audio" => AudioMode.Audio,
-            "Both" => AudioMode.Both,
-            _ => AudioMode.Both
-        };
-
-        await bot.SendTextMessageAsync(message.Chat, $"Selected message mode: {data}");
-    }*/
 
     #region Inline Mode
 
