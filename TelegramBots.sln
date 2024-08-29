@@ -4,6 +4,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.ListenYoutube", "Bot.Li
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.EngTubeBot", "Bot.EngTubeBot\Bot.EngTubeBot.csproj", "{EF123B54-D0F5-4C0C-8D5C-046ACC3D446C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.RecapRobot", "Bot.RecapRobot\Bot.RecapRobot.csproj", "{DA7E534A-0E69-473B-8C1C-B0E90D7FA024}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -18,5 +20,9 @@ Global
 		{EF123B54-D0F5-4C0C-8D5C-046ACC3D446C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{EF123B54-D0F5-4C0C-8D5C-046ACC3D446C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{EF123B54-D0F5-4C0C-8D5C-046ACC3D446C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DA7E534A-0E69-473B-8C1C-B0E90D7FA024}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DA7E534A-0E69-473B-8C1C-B0E90D7FA024}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DA7E534A-0E69-473B-8C1C-B0E90D7FA024}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DA7E534A-0E69-473B-8C1C-B0E90D7FA024}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
