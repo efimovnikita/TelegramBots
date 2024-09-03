@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.RecapRobot", "Bot.Recap
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.YTMusicFetcher", "Bot.YTMusicFetcher\Bot.YTMusicFetcher.csproj", "{ECBDABCD-48A5-41AF-9BF3-4CC30148297E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.VisualMigraineDiary", "Bot.VisualMigraineDiary\Bot.VisualMigraineDiary.csproj", "{AF603C4C-BE92-4E8B-8A1F-67D67C1988CF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +32,9 @@ Global
 		{ECBDABCD-48A5-41AF-9BF3-4CC30148297E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{ECBDABCD-48A5-41AF-9BF3-4CC30148297E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{ECBDABCD-48A5-41AF-9BF3-4CC30148297E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AF603C4C-BE92-4E8B-8A1F-67D67C1988CF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AF603C4C-BE92-4E8B-8A1F-67D67C1988CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AF603C4C-BE92-4E8B-8A1F-67D67C1988CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AF603C4C-BE92-4E8B-8A1F-67D67C1988CF}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
