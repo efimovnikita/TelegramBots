@@ -11,7 +11,7 @@ public class MigraineEvent
     public string Id { get; set; }
 
     [BsonElement("startTime")]
-    public DateTime StartTime { get; set; } = DateTime.Now;
+    public DateTime StartTime { get; set; } = DateTime.UtcNow;
 
     [BsonElement("scotoma")]
     [BsonRepresentation(BsonType.String)]
@@ -27,7 +27,7 @@ public class MigraineEvent
     public override string ToString()
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"Date: {StartTime}");
+        sb.AppendLine($"Date: {TimeZoneInfo.ConvertTimeFromUtc(StartTime, TimeZoneInfo.Local)}");
         sb.AppendLine($"Scotoma severity: {ScotomaSeverity}");
         if (Triggers.Any())
         {
