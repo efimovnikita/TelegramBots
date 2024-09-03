@@ -149,10 +149,20 @@ public class UpdateHandler(
                 return await bot.SendTextMessageAsync(msg.Chat.Id, "No migraine events found.");
             }
 
-            var eventList = string.Join("\n\n", events.Select(e => e.ToString()));
+            var eventList = events.Select(e => e.ToString()).ToList();
+            var messageText = $"Here are your recorded migraine events:\n\n";
+            messageText += string.Join("\n\n", eventList);
 
-            return await bot.SendTextMessageAsync(msg.Chat.Id, 
-                $"Here are your recorded migraine events:\n\n{eventList}");
+            if (messageText.Length <= 4000)
+            {
+                return await bot.SendTextMessageAsync(msg.Chat.Id, messageText);
+            }
+
+            var lastTenEvents = eventList.TakeLast(10).ToList();
+            messageText = "Here are your last 10 recorded migraine events:\n\n";
+            messageText += string.Join("\n\n", lastTenEvents);
+
+            return await bot.SendTextMessageAsync(msg.Chat.Id, messageText);
         }
         catch (Exception ex)
         {
