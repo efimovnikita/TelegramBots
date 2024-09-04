@@ -29,4 +29,13 @@ public class MigraineEventService
 
     public async Task RemoveAsync(string id) =>
         await _migraineEvents.DeleteOneAsync(x => x.Id == id);
+
+    public async Task<List<MigraineEvent>> GetEventsForDateRangeAsync(DateTime start, DateTime end)
+    {
+        var filter = Builders<MigraineEvent>.Filter.And(
+            Builders<MigraineEvent>.Filter.Gte(e => e.StartTime, start),
+            Builders<MigraineEvent>.Filter.Lt(e => e.StartTime, end)
+        );
+        return await _migraineEvents.Find(filter).ToListAsync();
+    }
 }

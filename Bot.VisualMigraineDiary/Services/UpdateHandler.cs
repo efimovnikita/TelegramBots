@@ -1,3 +1,4 @@
+using Bot.VisualMigraineDiary.Models;
 using Bot.VisualMigraineDiary.Pipelines;
 using Microsoft.Extensions.Logging;
 using Telegram.Bot;
@@ -57,11 +58,21 @@ public class UpdateHandler(
             {
                 "/start" => StartCommand(msg),
                 "/list" => ListEventsCommand(msg),
+                "/test" => TestHandler(msg),
                 _ => ProcessCommand(msg)
             });
             
             logger.LogInformation("The message was sent with id: {SentMessageId}", sentMessage.MessageId);
         }
+    }
+
+    private async Task<Message> TestHandler(Message msg)
+    {
+        var calendarTable = new CalendarTable(DateTime.Now, migraineEventService);
+        
+        return await bot.SendTextMessageAsync(
+            chatId: msg.Chat.Id,
+            text: "test"); 
     }
 
     private async Task<Message> ProcessCommand(Message msg)
