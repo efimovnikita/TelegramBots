@@ -5,9 +5,10 @@ using Serilog;
 using Telegram.Bot;
 using Bot.VisualMigraineDiary.Models;
 using Microsoft.Extensions.Configuration;
+using Refit;
 
 var host = Host.CreateDefaultBuilder(args)
-    .ConfigureAppConfiguration((hostingContext, config) =>
+    .ConfigureAppConfiguration((_, config) =>
     {
         config.AddEnvironmentVariables();
     })
@@ -24,6 +25,12 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddScoped<UpdateHandler>();
         services.AddScoped<ReceiverService>();
         services.AddHostedService<PollingService>();
+        
+        services.AddRefitClient<IFileSharingApi>()
+            .ConfigureHttpClient(client => client.BaseAddress = new Uri(context.Configuration["Urls:GatewayBaseAddress"] ?? ""));
+        
+        services.AddRefitClient<IAuthApi>()
+            .ConfigureHttpClient(client => client.BaseAddress = new Uri(context.Configuration["Urls:AuthGatewayBaseAddress"] ?? ""));
 
         services.Configure<MigraineDatabaseSettings>(
             context.Configuration.GetSection("MigraineDatabase"));

@@ -1,6 +1,8 @@
 using Bot.VisualMigraineDiary.Models;
 using Bot.VisualMigraineDiary.Pipelines;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Refit;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
@@ -8,6 +10,7 @@ using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.InlineQueryResults;
 using Exception = System.Exception;
+using File = System.IO.File;
 using Message = Telegram.Bot.Types.Message;
 
 namespace Bot.VisualMigraineDiary.Services;
@@ -16,7 +19,10 @@ public class UpdateHandler(
     ITelegramBotClient bot,
     ILogger<UpdateHandler> logger,
     IMemoryStateProvider memoryStateProvider,
-    MigraineEventService migraineEventService) : IUpdateHandler
+    MigraineEventService migraineEventService, 
+    IConfiguration configuration, 
+    IFileSharingApi fileSharingApi,
+    IAuthApi authApi) : IUpdateHandler
 {
     public async Task HandleErrorAsync(
         ITelegramBotClient botClient,
@@ -58,7 +64,7 @@ public class UpdateHandler(
             {
                 "/start" => StartCommand(msg),
                 "/list" => ListEventsCommand(msg),
-                "/test" => TestHandler(msg),
+                "/print" => PrintCommand(msg),
                 _ => ProcessCommand(msg)
             });
             
@@ -66,13 +72,43 @@ public class UpdateHandler(
         }
     }
 
-    private async Task<Message> TestHandler(Message msg)
+    private async Task<Message> PrintCommand(Message msg)
     {
-        var calendarTable = new CalendarTable(DateTime.Now, migraineEventService);
+        await fileSharingApi.CheckHealth();
         
+        var data = new Dictionary<string, string> {
+            { IAuthApi.GrantType, IAuthApi.ClientCredentials },
+            { IAuthApi.ClientId, configuration["BotConfiguration:ClientId"] ?? "" },
+            { IAuthApi.ClientSecret, configuration["BotConfiguration:ClientSecret"] ?? "" }
+        };
+
+        var authData = await authApi.GetAuthData(data);
+        
+        var table = new CalendarTable(DateTime.Now, migraineEventService);
+        var html = table.PrintTableAsHtml();
+
+        var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.html");
+        await File.WriteAllTextAsync(path, html);
+        
+        if (File.Exists(path))
+        {
+            var fileInfo = new FileInfo(path);
+            if (fileInfo.Length > 0)
+            {
+                var fileStream = System.IO.File.OpenRead(path);
+                var streamPart = new StreamPart(fileStream, Path.GetFileName(path), "multipart/form-data");
+
+                var uploadData = await fileSharingApi.UploadFile($"Bearer {authData.AccessToken}", streamPart);
+                
+                return await bot.SendTextMessageAsync(
+                    chatId: msg.Chat.Id,
+                    text: uploadData.FileUrl);        
+            }
+        }
+
         return await bot.SendTextMessageAsync(
             chatId: msg.Chat.Id,
-            text: "test"); 
+            text: "Unable to print the output"); 
     }
 
     private async Task<Message> ProcessCommand(Message msg)
