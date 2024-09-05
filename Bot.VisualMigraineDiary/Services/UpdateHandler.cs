@@ -64,7 +64,9 @@ public class UpdateHandler(
             {
                 "/start" => StartCommand(msg),
                 "/list" => ListEventsCommand(msg),
-                "/print" => PrintCommand(msg),
+                "/print" => PrintCommand(msg, DateTime.Now),
+                "/previous" => PrintCommand(msg, DateTime.Now.AddMonths(-1)),
+                "/long" => PrintCommand(msg, DateTime.Now.AddMonths(-2)),
                 _ => ProcessCommand(msg)
             });
             
@@ -72,7 +74,7 @@ public class UpdateHandler(
         }
     }
 
-    private async Task<Message> PrintCommand(Message msg)
+    private async Task<Message> PrintCommand(Message msg, DateTime dateTime)
     {
         await fileSharingApi.CheckHealth();
         
@@ -84,31 +86,35 @@ public class UpdateHandler(
 
         var authData = await authApi.GetAuthData(data);
         
-        var table = new CalendarTable(DateTime.Now, migraineEventService);
+        var table = new CalendarTable(dateTime, migraineEventService);
         var html = table.PrintTableAsHtml();
 
         var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.html");
         await File.WriteAllTextAsync(path, html);
-        
-        if (File.Exists(path))
-        {
-            var fileInfo = new FileInfo(path);
-            if (fileInfo.Length > 0)
-            {
-                var fileStream = System.IO.File.OpenRead(path);
-                var streamPart = new StreamPart(fileStream, Path.GetFileName(path), "multipart/form-data");
 
-                var uploadData = await fileSharingApi.UploadFile($"Bearer {authData.AccessToken}", streamPart);
-                
-                return await bot.SendTextMessageAsync(
-                    chatId: msg.Chat.Id,
-                    text: uploadData.FileUrl);        
-            }
+        if (!File.Exists(path))
+        {
+            return await bot.SendTextMessageAsync(
+                chatId: msg.Chat.Id,
+                text: "Unable to print the output");
         }
 
+        var fileInfo = new FileInfo(path);
+        if (fileInfo.Length <= 0)
+        {
+            return await bot.SendTextMessageAsync(
+                chatId: msg.Chat.Id,
+                text: "Unable to print the output");
+        }
+
+        var fileStream = File.OpenRead(path);
+        var streamPart = new StreamPart(fileStream, Path.GetFileName(path), "multipart/form-data");
+
+        var uploadData = await fileSharingApi.UploadFile($"Bearer {authData.AccessToken}", streamPart);
+                
         return await bot.SendTextMessageAsync(
             chatId: msg.Chat.Id,
-            text: "Unable to print the output"); 
+            text: uploadData.FileUrl);
     }
 
     private async Task<Message> ProcessCommand(Message msg)
