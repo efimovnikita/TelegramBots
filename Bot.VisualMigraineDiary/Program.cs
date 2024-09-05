@@ -4,7 +4,9 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using Telegram.Bot;
 using Bot.VisualMigraineDiary.Models;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Refit;
 
 var host = Host.CreateDefaultBuilder(args)
@@ -44,6 +46,12 @@ var host = Host.CreateDefaultBuilder(args)
             var strings = value.Split(",");
             var ids = strings.Select(long.Parse).ToArray();
             return new MemoryStateProvider(ids);
+        });
+        
+        services.AddSingleton<HtmlRenderer>(provider =>
+        {
+            var loggerFactory = provider.GetRequiredService<ILoggerFactory>();
+            return new HtmlRenderer(provider, loggerFactory);
         });
     })
     .UseSerilog((context, configuration) =>

@@ -1,5 +1,7 @@
 using Bot.VisualMigraineDiary.Models;
 using Bot.VisualMigraineDiary.Pipelines;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Refit;
@@ -22,7 +24,8 @@ public class UpdateHandler(
     MigraineEventService migraineEventService, 
     IConfiguration configuration, 
     IFileSharingApi fileSharingApi,
-    IAuthApi authApi) : IUpdateHandler
+    IAuthApi authApi,
+    HtmlRenderer htmlRenderer) : IUpdateHandler
 {
     public async Task HandleErrorAsync(
         ITelegramBotClient botClient,
@@ -59,6 +62,13 @@ public class UpdateHandler(
         {
             if (msg.Text is not { } messageText)
                 return;
+            
+            if (memoryStateProvider.IsContainUserId(msg.Chat.Id) == false)
+            {
+                await bot.SendTextMessageAsync(msg.Chat.Id,
+                    "\u26d4 You don't have permissions to use this bot.");
+                return;
+            }
 
             var sentMessage = await (messageText.Split(' ')[0] switch
             {
@@ -87,7 +97,18 @@ public class UpdateHandler(
         var authData = await authApi.GetAuthData(data);
         
         var table = new CalendarTable(dateTime, migraineEventService);
-        var html = table.PrintTableAsHtml();
+
+        var html = await htmlRenderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var dictionary = new Dictionary<string, object>
+            {
+                { "CalendarTable", table }
+            };
+
+            var parameters = ParameterView.FromDictionary(dictionary!);
+            var output = await htmlRenderer.RenderComponentAsync<CalendarView>(parameters);
+            return output.ToHtmlString();
+        });
 
         var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.html");
         await File.WriteAllTextAsync(path, html);
