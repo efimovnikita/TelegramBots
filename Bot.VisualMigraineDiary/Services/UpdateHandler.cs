@@ -32,6 +32,7 @@ public class UpdateHandler(
     private const string PrintCommandText = "/print";
     private const string PreviousCommandText = "/previous";
     private const string LongCommandText = "/long";
+    private const string ResetCommandText = "/reset";
 
     public async Task HandleErrorAsync(
         ITelegramBotClient botClient,
@@ -83,11 +84,19 @@ public class UpdateHandler(
                 PrintCommandText => PrintCommand(msg, DateTime.Now),
                 PreviousCommandText => PrintCommand(msg, DateTime.Now.AddMonths(-1)),
                 LongCommandText => PrintCommand(msg, DateTime.Now.AddMonths(-2)),
+                ResetCommandText => ResetCommand(msg),
                 _ => ProcessCommand(msg)
             });
             
             logger.LogInformation("The message was sent with id: {SentMessageId}", sentMessage.MessageId);
         }
+    }
+
+    private Task<Message> ResetCommand(Message msg)
+    {
+        memoryStateProvider.ResetCurrentPipeline(msg.Chat.Id);
+        return bot.SendTextMessageAsync(msg.Chat.Id,
+            "The current pipeline has been reset.");
     }
 
     private async Task<Message> PrintCommand(Message msg, DateTime dateTime)
