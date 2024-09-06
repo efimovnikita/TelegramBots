@@ -226,7 +226,19 @@
         builder.Append("data-event=\"");
         var mEvents = day
             .MigraineEvents
-            .Select(migraineEvent => $"{TimeZoneInfo.ConvertTimeFromUtc(migraineEvent.StartTime, TimeZoneInfo.Local):HH:mm} - {migraineEvent.ScotomaSeverity.GetDescription()}").ToArray();
+            .Select(migraineEvent => 
+            {
+                var description = $"{migraineEvent.ScotomaSeverity.GetDescription()}";
+                var triggers = migraineEvent.Triggers.Any() ? $" ({string.Join(", ", migraineEvent.Triggers)})" : "";
+                var fullText = description + triggers;
+
+                if (fullText.Length > 35)
+                {
+                    fullText = fullText.Substring(0, 32) + "...";
+                }
+
+                return triggers.Any() ? $"{fullText.Substring(0, fullText.IndexOf('('))} <span style='color: grey; font-size: x-small;'>{fullText.Substring(fullText.IndexOf('('))}</span>" : fullText;
+            }).ToArray();
         foreach (var mEvent in mEvents)
         {
             builder.Append(mEvent);

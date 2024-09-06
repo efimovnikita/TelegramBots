@@ -27,6 +27,12 @@ public class UpdateHandler(
     IAuthApi authApi,
     HtmlRenderer htmlRenderer) : IUpdateHandler
 {
+    private const string StartCommandText = "/start";
+    private const string ListCommandText = "/list";
+    private const string PrintCommandText = "/print";
+    private const string PreviousCommandText = "/previous";
+    private const string LongCommandText = "/long";
+
     public async Task HandleErrorAsync(
         ITelegramBotClient botClient,
         Exception exception,
@@ -72,11 +78,11 @@ public class UpdateHandler(
 
             var sentMessage = await (messageText.Split(' ')[0] switch
             {
-                "/start" => StartCommand(msg),
-                "/list" => ListEventsCommand(msg),
-                "/print" => PrintCommand(msg, DateTime.Now),
-                "/previous" => PrintCommand(msg, DateTime.Now.AddMonths(-1)),
-                "/long" => PrintCommand(msg, DateTime.Now.AddMonths(-2)),
+                StartCommandText => StartCommand(msg),
+                ListCommandText => ListEventsCommand(msg),
+                PrintCommandText => PrintCommand(msg, DateTime.Now),
+                PreviousCommandText => PrintCommand(msg, DateTime.Now.AddMonths(-1)),
+                LongCommandText => PrintCommand(msg, DateTime.Now.AddMonths(-2)),
                 _ => ProcessCommand(msg)
             });
             
