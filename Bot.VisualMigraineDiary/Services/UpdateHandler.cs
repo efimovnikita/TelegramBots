@@ -160,7 +160,13 @@ public class UpdateHandler(
         {
             return await bot.SendTextMessageAsync(
                 chatId: msg.Chat.Id,
-                text: "usage");
+                text: "Usage:\n" +
+                      "/start - Add a new migraine event\n" +
+                      "/list - List all recorded migraine events\n" +
+                      "/print - Print the current month's migraine events\n" +
+                      "/previous - Print the previous month's migraine events\n" +
+                      "/long - Print the migraine events from two months ago\n" +
+                      "/reset - Reset the current command");
         }
 
         await pipeline.ProcessCurrentItem(msg, bot);
