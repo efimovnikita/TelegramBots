@@ -10,7 +10,7 @@ public class ScotomaIntensityPipelineItem : IPipelineItem
     public Task<Message> AskAQuestion(Message message, ITelegramBotClient botClient, object? migraineEventObject = null)
     {
         return botClient.SendTextMessageAsync(message.Chat.Id,
-            "Оцените интенсивность боли по шкале от 1 до 5, где 1 - легкая скотома, а 5 - интенсивная скотома.");
+            "Evaluate the intensity of the pain on a scale of 1 to 5, where 1 is a mild scotoma, and 5 is an intense scotoma.");
     }
 
     public (bool, Task<Message>?) ValidateInput(Message message, ITelegramBotClient botClient)
@@ -18,13 +18,13 @@ public class ScotomaIntensityPipelineItem : IPipelineItem
         if (message.Type != MessageType.Text)
         {
             return (false,
-                botClient.SendTextMessageAsync(message.Chat.Id, "Ожидалось текстовое сообщение. Повторите ввод."));
+                botClient.SendTextMessageAsync(message.Chat.Id, "Expected a text message. Repeat the input."));
         }
 
         if (!int.TryParse(message.Text, out var intensity) || intensity < 1 || intensity > 5)
         {
             return (false,
-                botClient.SendTextMessageAsync(message.Chat.Id, "Пожалуйста, введите число от 1 до 5."));
+                botClient.SendTextMessageAsync(message.Chat.Id, "Please enter a number from 1 to 5."));
         }
 
         return (true, null);
@@ -35,7 +35,7 @@ public class ScotomaIntensityPipelineItem : IPipelineItem
         if (affectedObject is not MigraineEvent migraineEvent)
         {
             return (false,
-                botClient.SendTextMessageAsync(message.Chat.Id, "Редактируемый объект неверного типа. Повторите ввод."));
+                botClient.SendTextMessageAsync(message.Chat.Id, "The object to edit has the wrong type. Please repeat the input."));
         }
 
         migraineEvent.ScotomaSeverity = (ScotomaSeverity)int.Parse(message.Text!);

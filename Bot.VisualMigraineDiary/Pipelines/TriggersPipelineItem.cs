@@ -12,11 +12,11 @@ public class TriggersPipelineItem : IPipelineItem
     {
         var triggerOptions = string.Join(", ", Enum.GetNames(typeof(TriggerType)).Select(name => $"`{name}`"));
         var sb = new StringBuilder();
-        sb.AppendLine("Укажите триггеры мигрени через запятую. Доступные варианты:");
+        sb.AppendLine("Specify migraine triggers separated by commas. Available options:");
         sb.AppendLine();
         sb.AppendLine(triggerOptions);
         sb.AppendLine();
-        sb.AppendLine("Если триггеров нет, напишите `нет`.");
+        sb.AppendLine("If there are no triggers, write `no`.");
 
         return botClient.SendTextMessageAsync(message.Chat.Id, sb.ToString(), parseMode: ParseMode.Markdown);
     }
@@ -26,10 +26,10 @@ public class TriggersPipelineItem : IPipelineItem
         if (message.Type != MessageType.Text)
         {
             return (false,
-                botClient.SendTextMessageAsync(message.Chat.Id, "Ожидалось текстовое сообщение. Повторите ввод."));
+                botClient.SendTextMessageAsync(message.Chat.Id, "Expected a text message. Please repeat the input."));
         }
 
-        if (message.Text!.ToLower() == "нет")
+        if (message.Text!.ToLower() == "no")
         {
             return (true, null);
         }
@@ -42,7 +42,7 @@ public class TriggersPipelineItem : IPipelineItem
             var invalidTriggersString = string.Join(", ", invalidTriggers);
             return (false,
                 botClient.SendTextMessageAsync(message.Chat.Id, 
-                    $"Следующие триггеры недопустимы: {invalidTriggersString}. Пожалуйста, используйте только предложенные варианты."));
+                    $"The following triggers are invalid: {invalidTriggersString}. Please use only the suggested options."));
         }
 
         return (true, null);
@@ -53,10 +53,10 @@ public class TriggersPipelineItem : IPipelineItem
         if (affectedObject is not MigraineEvent migraineEvent)
         {
             return (false,
-                botClient.SendTextMessageAsync(message.Chat.Id, "Редактируемый объект неверного типа. Повторите ввод."));
+                botClient.SendTextMessageAsync(message.Chat.Id, "The object to edit has the wrong type. Please repeat the input."));
         }
 
-        if (message.Text!.ToLower() == "нет")
+        if (message.Text!.ToLower() == "no")
         {
             migraineEvent.Triggers = new List<TriggerType>();
         }

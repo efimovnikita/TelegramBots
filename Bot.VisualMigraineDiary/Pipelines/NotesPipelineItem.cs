@@ -10,7 +10,7 @@ public class NotesPipelineItem : IPipelineItem
     public Task<Message> AskAQuestion(Message message, ITelegramBotClient botClient, object? migraineEventObject = null)
     {
         return botClient.SendTextMessageAsync(message.Chat.Id, 
-            "Введите заметки о мигрени или напишите `нет`, если заметок нет.", 
+            "Enter notes about the migraine or write `no`, if there are no notes.", 
             parseMode: ParseMode.Markdown);
     }
 
@@ -19,7 +19,7 @@ public class NotesPipelineItem : IPipelineItem
         if (message.Type != MessageType.Text)
         {
             return (false,
-                botClient.SendTextMessageAsync(message.Chat.Id, "Ожидалось текстовое сообщение. Повторите ввод."));
+                botClient.SendTextMessageAsync(message.Chat.Id, "Expected a text message. Repeat the input."));
         }
 
         return (true, null);
@@ -30,10 +30,10 @@ public class NotesPipelineItem : IPipelineItem
         if (affectedObject is not MigraineEvent migraineEvent)
         {
             return (false,
-                botClient.SendTextMessageAsync(message.Chat.Id, "Редактируемый объект неверного типа. Повторите ввод."));
+                botClient.SendTextMessageAsync(message.Chat.Id, "The object to edit has the wrong type. Repeat the input."));
         }
 
-        migraineEvent.Notes = message.Text!.ToLower() == "нет" ? string.Empty : message.Text!;
+        migraineEvent.Notes = message.Text!.ToLower() == "no" ? string.Empty : message.Text!;
 
         return (true, null);
     }

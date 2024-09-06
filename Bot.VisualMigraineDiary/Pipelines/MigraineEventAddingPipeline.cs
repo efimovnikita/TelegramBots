@@ -49,8 +49,8 @@ public class MigraineEventAddingPipeline(IPipelineItem[] items, MigraineEventSer
 
         return await botClient.SendTextMessageAsync(message.Chat.Id,
             sentResult
-                ? "Данные о мигрени добавлены в базу данных."
-                : "Не удалось добавить данные о мигрени в базу данных.");
+                ? "Migraine data has been added to the database."
+                : "Failed to add migraine data to the database.");
     }
 
     public bool IsPipelineQueueEmpty() => PipelineItems.Count == 0;
