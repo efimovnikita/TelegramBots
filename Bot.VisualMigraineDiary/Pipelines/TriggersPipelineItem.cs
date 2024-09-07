@@ -3,6 +3,7 @@ using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using System.Text;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace Bot.VisualMigraineDiary.Pipelines;
 
@@ -18,7 +19,12 @@ public class TriggersPipelineItem : IPipelineItem
         sb.AppendLine();
         sb.AppendLine("If there are no triggers, write `no`.");
 
-        return botClient.SendTextMessageAsync(message.Chat.Id, sb.ToString(), parseMode: ParseMode.Markdown);
+        var replyMarkup = new ReplyKeyboardMarkup(true)
+            .AddNewRow("no");
+        replyMarkup.OneTimeKeyboard = true;
+        
+        return botClient.SendTextMessageAsync(message.Chat.Id, sb.ToString(), parseMode: ParseMode.Markdown,
+            replyMarkup: replyMarkup);
     }
 
     public (bool, Task<Message>?) ValidateInput(Message message, ITelegramBotClient botClient)

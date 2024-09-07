@@ -2,6 +2,7 @@
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace Bot.VisualMigraineDiary.Pipelines;
 
@@ -9,9 +10,14 @@ public class NotesPipelineItem : IPipelineItem
 {
     public Task<Message> AskAQuestion(Message message, ITelegramBotClient botClient, object? migraineEventObject = null)
     {
+        var replyMarkup = new ReplyKeyboardMarkup(true)
+            .AddNewRow("no");
+        replyMarkup.OneTimeKeyboard = true;
+        
         return botClient.SendTextMessageAsync(message.Chat.Id, 
             "Enter notes about the migraine or write `no`, if there are no notes.", 
-            parseMode: ParseMode.Markdown);
+            parseMode: ParseMode.Markdown,
+            replyMarkup: replyMarkup);
     }
 
     public (bool, Task<Message>?) ValidateInput(Message message, ITelegramBotClient botClient)

@@ -2,6 +2,7 @@
 using Telegram.Bot;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace Bot.VisualMigraineDiary.Pipelines;
 
@@ -9,8 +10,13 @@ public class ScotomaIntensityPipelineItem : IPipelineItem
 {
     public Task<Message> AskAQuestion(Message message, ITelegramBotClient botClient, object? migraineEventObject = null)
     {
+        var replyMarkup = new ReplyKeyboardMarkup(true)
+            .AddNewRow("1", "2", "3", "4", "5");
+        replyMarkup.OneTimeKeyboard = true;
+        
         return botClient.SendTextMessageAsync(message.Chat.Id,
-            "Evaluate the intensity of the pain on a scale of 1 to 5, where 1 is a mild scotoma, and 5 is an intense scotoma.");
+            "Evaluate the intensity of the pain on a scale of 1 to 5, where 1 is a mild scotoma, and 5 is an intense scotoma.",
+            replyMarkup: replyMarkup);
     }
 
     public (bool, Task<Message>?) ValidateInput(Message message, ITelegramBotClient botClient)

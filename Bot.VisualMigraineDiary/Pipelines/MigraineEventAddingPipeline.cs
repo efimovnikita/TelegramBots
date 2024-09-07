@@ -2,6 +2,7 @@
 using Bot.VisualMigraineDiary.Services;
 using Telegram.Bot;
 using Telegram.Bot.Types;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace Bot.VisualMigraineDiary.Pipelines;
 
@@ -50,7 +51,7 @@ public class MigraineEventAddingPipeline(IPipelineItem[] items, MigraineEventSer
         return await botClient.SendTextMessageAsync(message.Chat.Id,
             sentResult
                 ? "Migraine data has been added to the database."
-                : "Failed to add migraine data to the database.");
+                : "Failed to add migraine data to the database.", replyMarkup: new ReplyKeyboardRemove());
     }
 
     public bool IsPipelineQueueEmpty() => PipelineItems.Count == 0;

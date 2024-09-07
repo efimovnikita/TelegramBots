@@ -11,6 +11,7 @@ using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
 using Telegram.Bot.Types.InlineQueryResults;
+using Telegram.Bot.Types.ReplyMarkups;
 using Exception = System.Exception;
 using File = System.IO.File;
 using Message = Telegram.Bot.Types.Message;
@@ -96,7 +97,7 @@ public class UpdateHandler(
     {
         memoryStateProvider.ResetCurrentPipeline(msg.Chat.Id);
         return bot.SendTextMessageAsync(msg.Chat.Id,
-            "The current pipeline has been reset.");
+            "The current pipeline has been reset.", replyMarkup: new ReplyKeyboardRemove());
     }
 
     private async Task<Message> PrintCommand(Message msg, DateTime dateTime)
