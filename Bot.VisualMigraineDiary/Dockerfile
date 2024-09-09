@@ -7,7 +7,7 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
 # Copy local NuGet packages
-COPY Bot.EngTubeBot/nuget/ /nuget
+COPY Bot.VisualMigraineDiary/nuget/ /nuget
 
 # Add local NuGet source
 RUN dotnet nuget add source /nuget
