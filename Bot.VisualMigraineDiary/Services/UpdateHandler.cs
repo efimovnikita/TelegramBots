@@ -263,7 +263,7 @@ public class UpdateHandler(
         catch (Exception ex)
         {
             return await bot.SendTextMessageAsync(msg.Chat.Id, 
-                $"An error occurred while fetching migraine events: {ex.Message}");
+                $"An error occurred while fetching migraine events:\n{ex.Message}");
         }
     }
 }
