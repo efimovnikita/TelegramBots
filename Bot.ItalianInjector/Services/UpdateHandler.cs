@@ -135,7 +135,7 @@ public class UpdateHandler : IUpdateHandler
             var builder = new StringBuilder();
             foreach (var engSentence in sentences)
             {
-                builder.AppendLine($"<p>{engSentence}</p>");
+                builder.AppendLine($"<p lang=\"en\"><span class=\"english-text\">{engSentence}</span></p>");
 
                 try
                 {
@@ -171,7 +171,7 @@ public class UpdateHandler : IUpdateHandler
                     var response = client.Messages.GetClaudeMessageAsync(parameters).ConfigureAwait(false).GetAwaiter().GetResult();
                     var italianSentence = response.Message.ToString();
     
-                    builder.AppendLine($"<p>{italianSentence}</p>");
+                    builder.AppendLine($"<p lang=\"it\"><span class=\"italian-text\">{italianSentence}</span></p>");
                 }
                 catch (Exception ex)
                 {
@@ -180,21 +180,31 @@ public class UpdateHandler : IUpdateHandler
             }
         
             // create a new htm file
-            var htmFileContent = $"""
-                                  <!DOCTYPE html>
-                                  <html>
-                                  <head>
-                                      <meta charset="UTF-8">
-                                      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                                      <title>Translation (English and Italian)</title>
-                                  </head>
-                                  <body>
-                                      <main>
-                                         {builder}
-                                      </main>
-                                  </body>
-                                  </html>
-                                  """;
+            var htmFileContent = $$"""
+                                   <!DOCTYPE html>
+                                   <html>
+                                   <head>
+                                       <meta charset="UTF-8">
+                                       <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                       <title>Translation (English and Italian)</title>
+                                       <style type="text/css">
+                                            .english-text {
+                                                   font-style: italic;
+                                                   color: #0000FF;
+                                               }
+                                           .italian-text {
+                                               font-weight: bold;
+                                               color: #008000;
+                                           }
+                                       </style>
+                                   </head>
+                                   <body>
+                                       <main>
+                                          {{builder}}
+                                       </main>
+                                   </body>
+                                   </html>
+                                   """;
 
             _logger.LogInformation("Creating HTML file");
             var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.htm");
@@ -231,14 +241,13 @@ public class UpdateHandler : IUpdateHandler
                 };
 
                 var authData = _authApi.GetAuthData(data).ConfigureAwait(false).GetAwaiter().GetResult();
-                var uploadData = _fileSharingApi.UploadFile($"Bearer {authData.AccessToken}", streamPart).ConfigureAwait(false).GetAwaiter().GetResult();
+                UploadData uploadData = _fileSharingApi.UploadFile($"Bearer {authData.AccessToken}", streamPart).ConfigureAwait(false).GetAwaiter().GetResult();
 
                 _logger.LogInformation("File uploaded successfully. Sending URL to user");
 
-                if (uploadData != null)
-                    _bot.SendTextMessageAsync(
-                        chatId: request.UserId,
-                        text: uploadData.FileUrl).ConfigureAwait(false).GetAwaiter().GetResult();
+                _bot.SendTextMessageAsync(
+                    chatId: request.UserId,
+                    text: uploadData.FileUrl).ConfigureAwait(false).GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
