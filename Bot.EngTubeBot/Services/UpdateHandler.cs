@@ -1,10 +1,10 @@
-using System.Net.Http.Headers;
 using System.Text.Json;
 using Bot.EngTubeBot.Models;
 using BotSharedLibrary;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Refit;
 using StackExchange.Redis;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
@@ -22,7 +22,10 @@ public class UpdateHandler(
     ILogger<UpdateHandler> logger,
     IHttpClientFactory clientFactory,
     IConfiguration configuration,
-    IOptions<RedisSettings> redisSettings)
+    IOptions<RedisSettings> redisSettings,
+    IFileSharingApi fileSharingApi,
+    IAuthApi authApi,
+    IAudioApi audioApi)
     : IUpdateHandler
 {
     private readonly Dictionary<long, UserSettings> _inMemorySettings = [];
@@ -30,6 +33,10 @@ public class UpdateHandler(
 
     private static readonly TimeSpan WaitInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan MaxWaitTime = TimeSpan.FromMinutes(10);
+    
+    private const string KeyCommand = "/key";
+    private const string PromptCommand = "/prompt";
+    private const string InjectCommand = "/inject";
     
     public async Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, HandleErrorSource source, CancellationToken cancellationToken)
     {
@@ -64,9 +71,9 @@ public class UpdateHandler(
 
             var sentMessage = await (messageText.Split(' ')[0] switch
             {
-                "/key" => SetKey(msg),
-                "/prompt" => SetPrompt(msg),
-                "/inject" => SetInjection(msg),
+                KeyCommand => SetKey(msg),
+                PromptCommand => SetPrompt(msg),
+                InjectCommand => SetInjection(msg),
                 _ => DefaultBehaviour(msg)
             });
             
@@ -165,7 +172,7 @@ public class UpdateHandler(
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
-            return await SendToCloudAndGetTranslation(msg, clientFactory.CreateClient(), filePath, settings);
+            return await SendToCloudAndGetTranslation(msg, filePath, settings);
         }
         catch (Exception ex)
         {
@@ -194,7 +201,7 @@ public class UpdateHandler(
                 replyParameters: new ReplyParameters { MessageId = msg.MessageId });
         }
         
-        var prompt = msgText.Replace("/prompt", "").Trim();
+        var prompt = msgText.Replace(PromptCommand, "").Trim();
         if (string.IsNullOrWhiteSpace(prompt))
         {
             return await bot.SendTextMessageAsync(msg.Chat, "Unable to set the prompt",
@@ -223,7 +230,7 @@ public class UpdateHandler(
                 replyParameters: new ReplyParameters { MessageId = msg.MessageId });
         }
 
-        var key = msgText.Replace("/key", "").Trim();
+        var key = msgText.Replace(KeyCommand, "").Trim();
         if (string.IsNullOrWhiteSpace(key))
         {
             return await bot.SendTextMessageAsync(msg.Chat, "Unable to set the key",
@@ -262,52 +269,24 @@ public class UpdateHandler(
         return (false, null);
     }
 
-    private async Task<Message> CheckTranslationStatusAsync(HttpClient httpClient, string audioStatusEndpointUrl,
-        string jobId, Message msg, AuthData? authData, string authServer, string clientId, string clientSecret,
+    private async Task<Message> CheckTranslationStatusAsync(string jobId, Message msg,
         UserSettings? settings)
     {
         var startTime = DateTime.UtcNow;
 
         while (DateTime.UtcNow - startTime < MaxWaitTime)
         {
-            var translationStatusRequest = new HttpRequestMessage
-            {
-                Method = HttpMethod.Get,
-                RequestUri = new Uri($"{audioStatusEndpointUrl}?id={jobId}")
-            };
+            var jobStatus = await audioApi.CheckJobStatus(jobId);
 
-            using var translationStatusResponse = await httpClient.SendAsync(translationStatusRequest);
-
-            if (!translationStatusResponse.IsSuccessStatusCode)
+            if (jobStatus.Status == "Failed")
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Response from status audio endpoint was unsuccessful",
+                return await bot.SendTextMessageAsync(msg.Chat, $"Something went wrong.\n\nThe error message:\n{jobStatus.Error}",
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
-            var translationStatusResponseStr = await translationStatusResponse.Content.ReadAsStringAsync();
-            if (string.IsNullOrEmpty(translationStatusResponseStr))
+            if (jobStatus.Status == "Succeeded")
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Response from status audio endpoint was unsuccessful",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var translationStatusResponseData =
-                JsonSerializer.Deserialize<TranslationStatusResponseData>(translationStatusResponseStr);
-            if (translationStatusResponseData == null)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Response from status audio endpoint was unsuccessful",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-            
-            if (translationStatusResponseData.Status == "Failed")
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, $"Something went wrong.\n\nThe error message:\n{translationStatusResponseData.Error}",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            if (translationStatusResponseData.Status == "Succeeded")
-            {
-                if (string.IsNullOrWhiteSpace(translationStatusResponseData.Result))
+                if (string.IsNullOrWhiteSpace(jobStatus.Result))
                 {
                     return await bot.SendTextMessageAsync(msg.Chat, "Result from the status audio endpoint is empty",
                         replyParameters: new ReplyParameters { MessageId = msg.MessageId });
@@ -315,68 +294,21 @@ public class UpdateHandler(
 
                 if (settings is { InjectLanguage: true })
                 {
-                    var requestForItalianInject = new LanguageInjectionRequest(msg.Chat.Id, translationStatusResponseData.Result);
+                    var requestForItalianInject = new LanguageInjectionRequest(msg.Chat.Id, jobStatus.Result);
                     var json = JsonSerializer.Serialize(requestForItalianInject);
                     var subscriber = _redisConnection.GetSubscriber();
                     await subscriber.PublishAsync(redisSettings.Value.ChannelName, json);
                 }
 
-                if (translationStatusResponseData.Result.Length > 4000)
+                if (jobStatus.Result.Length > 4000)
                 {
-                    var fileSharingEndpointHealthUrl = configuration["Urls:FileSharingEndpointHealth"];
-                    if (fileSharingEndpointHealthUrl == null)
-                    {
-                        return await bot.SendTextMessageAsync(msg.Chat,
-                            "Unable to determine the health status of the file sharing endpoint",
-                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                    }
-
-                    var uploadEndHealthRequest = new HttpRequestMessage
-                    {
-                        Method = HttpMethod.Get,
-                        RequestUri = new Uri(fileSharingEndpointHealthUrl),
+                    var data = new Dictionary<string, string> {
+                        { IAuthApi.GrantType, IAuthApi.ClientCredentials },
+                        { IAuthApi.ClientId, configuration["BotConfiguration:ClientId"] ?? "" },
+                        { IAuthApi.ClientSecret, configuration["BotConfiguration:ClientSecret"] ?? "" }
                     };
 
-                    using var uploadEndHealthResponse = await httpClient.SendAsync(uploadEndHealthRequest);
-                    if (uploadEndHealthResponse.IsSuccessStatusCode == false)
-                    {
-                        return await bot.SendTextMessageAsync(msg.Chat, "File sharing endpoint is down",
-                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                    }
-                    
-                    if (authData == null)
-                    {
-                        return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
-                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                    }
-
-                    if (authData.ShouldRefreshToken())
-                    {
-                        authData = await GetAuthData(httpClient, authServer, clientId, clientSecret);
-                    }
-
-                    if (authData == null)
-                    {
-                        return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
-                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                    }
-
-                    var fileSharingEndpointUrl = configuration["Urls:FileSharingEndpoint"];
-                    if (fileSharingEndpointUrl == null)
-                    {
-                        return await bot.SendTextMessageAsync(msg.Chat, "Unable to get the file sharing endpoint url",
-                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                    }
-
-                    var uploadFileRequest = new HttpRequestMessage
-                    {
-                        Method = HttpMethod.Post,
-                        RequestUri = new Uri(fileSharingEndpointUrl),
-                        Headers =
-                        {
-                            { "Authorization", $"Bearer {authData.AccessToken}" },
-                        }
-                    };
+                    var authData = await authApi.GetAuthData(data);
 
                     // create a new htm file
                     var htmFileContent = $"""
@@ -390,7 +322,7 @@ public class UpdateHandler(
                                          <body>
                                              <main>
                                                 <p>
-                                                    {translationStatusResponseData.Result}
+                                                    {jobStatus.Result}
                                                 </p>
                                              </main>
                                          </body>
@@ -400,47 +332,20 @@ public class UpdateHandler(
                     var htmFilePath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.htm");
                     await File.WriteAllTextAsync(htmFilePath, htmFileContent);
                     
-                    var content = new MultipartFormDataContent();
-                    var fileBytes = await File.ReadAllBytesAsync(htmFilePath);
-                    var fileContent = new ByteArrayContent(fileBytes);
-                    fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data");
-                    content.Add(fileContent, "file", Path.GetFileName(htmFilePath));
-                    uploadFileRequest.Content = content;
-
-                    using var uploadFileResponse = await httpClient.SendAsync(uploadFileRequest);
-                    if (uploadFileResponse.IsSuccessStatusCode == false)
-                    {
-                        return await bot.SendTextMessageAsync(msg.Chat,
-                            $"Unable to upload the audio file to file sharing server. StatusCode: {uploadFileResponse.StatusCode}",
-                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                    }
-
-                    var uploadResultStr = await uploadFileResponse.Content.ReadAsStringAsync();
-                    if (string.IsNullOrEmpty(uploadResultStr))
-                    {
-                        return await bot.SendTextMessageAsync(msg.Chat,
-                            "Unable to get upload data from file sharing server",
-                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                    }
-
-                    var uploadData = JsonSerializer.Deserialize<UploadData>(uploadResultStr);
-                    if (uploadData == null)
-                    {
-                        return await bot.SendTextMessageAsync(msg.Chat,
-                            "Unable to get upload data from file sharing server",
-                            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-                    }
+                    var fileStream = File.OpenRead(htmFilePath);
+                    var streamPart = new StreamPart(fileStream, Path.GetFileName(htmFilePath), "multipart/form-data");
+                    
+                    var uploadData = await fileSharingApi.UploadFile($"Bearer {authData.AccessToken}", streamPart);
 
                     return await bot.SendTextMessageAsync(msg.Chat, $"<a href=\"{uploadData.FileUrl}\">Translation</a>",
                         replyParameters: new ReplyParameters { MessageId = msg.MessageId },
                         parseMode: ParseMode.Html);
                 }
 
-                return await bot.SendTextMessageAsync(msg.Chat, translationStatusResponseData.Result,
+                return await bot.SendTextMessageAsync(msg.Chat, jobStatus.Result,
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
-            // Wait for 10 seconds before the next request
             await Task.Delay(WaitInterval);
         }
 
@@ -472,7 +377,7 @@ public class UpdateHandler(
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
-            var allowedServerUrl = configuration["Urls:AllowedFileSharingServer"];
+            var allowedServerUrl = configuration["Urls:GatewayBaseAddress"];
             if (string.IsNullOrWhiteSpace(allowedServerUrl))
             {
                 return await bot.SendTextMessageAsync(msg.Chat,
@@ -521,7 +426,7 @@ public class UpdateHandler(
             // first of all - save the file
             var filePath = await SaveBytesToFile(bytes);
 
-            return await SendToCloudAndGetTranslation(msg, httpClient, filePath, settings);
+            return await SendToCloudAndGetTranslation(msg, filePath, settings);
         }
         catch (Exception ex)
         {
@@ -534,110 +439,33 @@ public class UpdateHandler(
         }
     }
 
-    private async Task<Message> SendToCloudAndGetTranslation(Message msg, HttpClient httpClient, string filePath, UserSettings? settings)
+    private async Task<Message> SendToCloudAndGetTranslation(Message msg, string filePath, UserSettings? settings)
     {
-        var healthUrl = configuration["Urls:AudioEndpointHealth"];
-        if (healthUrl == null)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat,
-                "Unable to check the fact that the main endpoint is healthy",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
+        await audioApi.CheckHealth();
 
-        var healthRequest = new HttpRequestMessage
-        {
-            Method = HttpMethod.Get,
-            RequestUri = new Uri(healthUrl),
-        };
-        using var healthResponse = await httpClient.SendAsync(healthRequest);
-        if (healthResponse.IsSuccessStatusCode == false)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat, "Audio microservice is unhealthy",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-
-        var authServer = configuration["Urls:AuthServer"];
-        var clientId = configuration["BotConfiguration:ClientId"];
-        var clientSecret = configuration["BotConfiguration:ClientSecret"];
-
-        if ((authServer != null && clientId != null && clientSecret != null) == false)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-
-        var authData = await GetAuthData(httpClient, authServer, clientId, clientSecret);
-        if (authData == null)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-
-        var audioEndpointUrl = configuration["Urls:AudioEndpoint"];
-        if (audioEndpointUrl == null)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat,
-                "Unable to send the request to audio endpoint. Provide url to the endpoint",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-
-        var translationRequest = new HttpRequestMessage
-        {
-            Method = HttpMethod.Post,
-            RequestUri = new Uri(audioEndpointUrl),
-            Headers =
-            {
-                { "Authorization", $"Bearer {authData.AccessToken}" }
-            }
+        var data = new Dictionary<string, string> {
+            { IAuthApi.GrantType, IAuthApi.ClientCredentials },
+            { IAuthApi.ClientId, configuration["BotConfiguration:ClientId"] ?? "" },
+            { IAuthApi.ClientSecret, configuration["BotConfiguration:ClientSecret"] ?? "" }
         };
 
-        var content = new MultipartFormDataContent();
-        var fileBytes = await File.ReadAllBytesAsync(filePath);
-        var fileContent = new ByteArrayContent(fileBytes);
-        fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data");
-        content.Add(fileContent, "audioFile", Path.GetFileName(filePath));
-        content.Add(new StringContent(settings?.Prompt ?? ""), "prompt");
-        content.Add(new StringContent(settings?.Key ?? ""), "openaiApiKey");
-        translationRequest.Content = content;
+        var authData = authApi.GetAuthData(data).ConfigureAwait(false).GetAwaiter().GetResult();
+        
+        var fileStream = File.OpenRead(filePath);
+        var streamPart = new StreamPart(fileStream, Path.GetFileName(filePath), "multipart/form-data");
+        
+        var jobInfo = await audioApi.MakeTranslationFromAudio($"Bearer {authData.AccessToken}",
+            streamPart,
+            settings?.Prompt ?? "",
+            settings?.Key ?? "");
 
-        using var translationResponse = await httpClient.SendAsync(translationRequest);
-        if (translationResponse.IsSuccessStatusCode == false)
+        if (string.IsNullOrWhiteSpace(jobInfo.JobId))
         {
             return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
                 replyParameters: new ReplyParameters { MessageId = msg.MessageId });
         }
 
-        var translationResponseStr = await translationResponse.Content.ReadAsStringAsync();
-        if (string.IsNullOrEmpty(translationResponseStr))
-        {
-            return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-
-        var translationResponseData = JsonSerializer.Deserialize<TranslationResponseData>(translationResponseStr);
-        if (translationResponseData == null)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-
-        var jobId = translationResponseData.JobId;
-        if (string.IsNullOrWhiteSpace(jobId))
-        {
-            return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-
-        var audioStatusEndpointUrl = configuration["Urls:AudioStatusEndpoint"];
-        if (audioStatusEndpointUrl == null)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat,
-                "Unable to send the status request to audio endpoint. Provide url to the endpoint",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-
-        return await CheckTranslationStatusAsync(httpClient, audioStatusEndpointUrl, jobId, msg, authData,
-            authServer, clientId, clientSecret, settings);
+        return await CheckTranslationStatusAsync(jobInfo.JobId, msg, settings);
     }
 
     private async Task<string> SaveBytesToFile(byte[] bytes)
@@ -660,72 +488,6 @@ public class UpdateHandler(
         var filePath = Path.Combine(Path.GetTempPath(), uniqueFileName);
         return filePath;
     }
-
-    private async Task<AuthData?> GetAuthData(HttpClient httpClient, string authServer, string clientId,
-        string clientSecret)
-    {
-        try
-        {
-            var authRequest = new HttpRequestMessage
-            {
-                Method = HttpMethod.Post,
-                RequestUri = new Uri(authServer),
-                Content = new FormUrlEncodedContent(new Dictionary<string, string>
-                {
-                    { "grant_type", "client_credentials" },
-                    { "client_id", clientId },
-                    { "client_secret", clientSecret },
-                })
-            };
-            using var authResponse = await httpClient.SendAsync(authRequest);
-            if (authResponse.IsSuccessStatusCode == false)
-            {
-                return null;
-            }
-
-            var authStr = await authResponse.Content.ReadAsStringAsync();
-
-            if (string.IsNullOrEmpty(authStr))
-            {
-                return null;
-            }
-
-            return JsonSerializer.Deserialize<AuthData>(authStr);
-        }
-        catch (Exception e)
-        {
-            logger.LogError(e, "Error while getting the auth data");
-            return null;
-        }
-    }
-
-    /*private async Task OnCallbackQuery(CallbackQuery callbackQuery)
-    {
-        logger.LogInformation("Received inline keyboard callback from: {CallbackQueryId}", callbackQuery.Id);
-
-        var data = callbackQuery.Data;
-        var message = callbackQuery.Message;
-        if (message == null)
-        {
-            return;
-        }
-
-        var chat = message.Chat;
-        if (data == null)
-        {
-            return;
-        }
-
-        _inMemorySettings[chat.Id] = data switch
-        {
-            "Voice" => AudioMode.Voice,
-            "Audio" => AudioMode.Audio,
-            "Both" => AudioMode.Both,
-            _ => AudioMode.Both
-        };
-
-        await bot.SendTextMessageAsync(message.Chat, $"Selected message mode: {data}");
-    }*/
 
     #region Inline Mode
 
