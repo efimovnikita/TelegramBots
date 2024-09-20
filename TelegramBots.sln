@@ -10,6 +10,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.YTMusicFetcher", "Bot.Y
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.VisualMigraineDiary", "Bot.VisualMigraineDiary\Bot.VisualMigraineDiary.csproj", "{AF603C4C-BE92-4E8B-8A1F-67D67C1988CF}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Bot.ItalianInjector", "Bot.ItalianInjector\Bot.ItalianInjector.csproj", "{73396019-6377-4622-BD41-3A6775A8BA84}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BotSharedLibrary", "BotSharedLibrary\BotSharedLibrary.csproj", "{D3AABD8C-73B0-42B7-A2AD-EF7FBD995A91}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -36,5 +40,13 @@ Global
 		{AF603C4C-BE92-4E8B-8A1F-67D67C1988CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{AF603C4C-BE92-4E8B-8A1F-67D67C1988CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{AF603C4C-BE92-4E8B-8A1F-67D67C1988CF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{73396019-6377-4622-BD41-3A6775A8BA84}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{73396019-6377-4622-BD41-3A6775A8BA84}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{73396019-6377-4622-BD41-3A6775A8BA84}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{73396019-6377-4622-BD41-3A6775A8BA84}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D3AABD8C-73B0-42B7-A2AD-EF7FBD995A91}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D3AABD8C-73B0-42B7-A2AD-EF7FBD995A91}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D3AABD8C-73B0-42B7-A2AD-EF7FBD995A91}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D3AABD8C-73B0-42B7-A2AD-EF7FBD995A91}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

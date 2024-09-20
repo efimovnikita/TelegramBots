@@ -1,6 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 
-namespace Bot.EngTubeBot.Models;
+namespace BotSharedLibrary;
 
 public class UploadData
 {

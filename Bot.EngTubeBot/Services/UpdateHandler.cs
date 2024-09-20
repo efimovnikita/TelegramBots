@@ -1,8 +1,11 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Bot.EngTubeBot.Models;
+using BotSharedLibrary;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
@@ -14,9 +17,17 @@ using File = System.IO.File;
 
 namespace Bot.EngTubeBot.Services;
 
-public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger, IHttpClientFactory clientFactory, IConfiguration configuration) : IUpdateHandler
+public class UpdateHandler(
+    ITelegramBotClient bot,
+    ILogger<UpdateHandler> logger,
+    IHttpClientFactory clientFactory,
+    IConfiguration configuration,
+    IOptions<RedisSettings> redisSettings)
+    : IUpdateHandler
 {
     private readonly Dictionary<long, UserSettings> _inMemorySettings = [];
+    private readonly ConnectionMultiplexer _redisConnection = ConnectionMultiplexer.Connect(redisSettings.Value.ConnectionString);
+
     private static readonly TimeSpan WaitInterval = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan MaxWaitTime = TimeSpan.FromMinutes(10);
     
@@ -55,6 +66,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             {
                 "/key" => SetKey(msg),
                 "/prompt" => SetPrompt(msg),
+                "/inject" => SetInjection(msg),
                 _ => DefaultBehaviour(msg)
             });
             
@@ -71,6 +83,21 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             
             logger.LogInformation("The message was sent with id: {SentMessageId}", sentMessage.MessageId);
         }
+    }
+
+    private async Task<Message> SetInjection(Message msg)
+    {
+        var getSettingsResult = _inMemorySettings.TryGetValue(msg.Chat.Id, out var settings);
+        if (getSettingsResult == false)
+        {
+            settings = new UserSettings("", "");
+            _inMemorySettings.Add(msg.Chat.Id, settings);
+        }
+        
+        _inMemorySettings[msg.Chat.Id].InjectLanguage = !_inMemorySettings[msg.Chat.Id].InjectLanguage;
+        
+        return await bot.SendTextMessageAsync(msg.Chat, $"The language injection was set to: {_inMemorySettings[msg.Chat.Id].InjectLanguage}",
+            replyParameters: new ReplyParameters { MessageId = msg.MessageId });
     }
 
     private async Task<Message> DefaultAudioBehaviour(Message msg)
@@ -236,7 +263,8 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
     }
 
     private async Task<Message> CheckTranslationStatusAsync(HttpClient httpClient, string audioStatusEndpointUrl,
-        string jobId, Message msg, AuthData? authData, string authServer, string clientId, string clientSecret)
+        string jobId, Message msg, AuthData? authData, string authServer, string clientId, string clientSecret,
+        UserSettings? settings)
     {
         var startTime = DateTime.UtcNow;
 
@@ -283,6 +311,14 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                 {
                     return await bot.SendTextMessageAsync(msg.Chat, "Result from the status audio endpoint is empty",
                         replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+                }
+
+                if (settings is { InjectLanguage: true })
+                {
+                    var requestForItalianInject = new LanguageInjectionRequest(msg.Chat.Id, translationStatusResponseData.Result);
+                    var json = JsonSerializer.Serialize(requestForItalianInject);
+                    var subscriber = _redisConnection.GetSubscriber();
+                    await subscriber.PublishAsync(redisSettings.Value.ChannelName, json);
                 }
 
                 if (translationStatusResponseData.Result.Length > 4000)
@@ -601,7 +637,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
         }
 
         return await CheckTranslationStatusAsync(httpClient, audioStatusEndpointUrl, jobId, msg, authData,
-            authServer, clientId, clientSecret);
+            authServer, clientId, clientSecret, settings);
     }
 
     private async Task<string> SaveBytesToFile(byte[] bytes)
