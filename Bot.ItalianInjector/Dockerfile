@@ -7,23 +7,23 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
 # Copy local NuGet packages
-COPY Bot.EngTubeBot/nuget/ /nuget
+COPY Bot.ItalianInjector/nuget/ /nuget
 
 # Add local NuGet source
 RUN dotnet nuget add source /nuget
 
-COPY ["Bot.EngTubeBot/Bot.EngTubeBot.csproj", "Bot.EngTubeBot/"]
+COPY ["Bot.ItalianInjector/Bot.ItalianInjector.csproj", "Bot.ItalianInjector/"]
 COPY ["BotSharedLibrary/BotSharedLibrary.csproj", "BotSharedLibrary/"]
-RUN dotnet restore "Bot.EngTubeBot/Bot.EngTubeBot.csproj"
+RUN dotnet restore "Bot.ItalianInjector/Bot.ItalianInjector.csproj"
 COPY . .
-WORKDIR "/src/Bot.EngTubeBot"
-RUN dotnet build "Bot.EngTubeBot.csproj" -c $BUILD_CONFIGURATION -o /app/build
+WORKDIR "/src/Bot.ItalianInjector"
+RUN dotnet build "Bot.ItalianInjector.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 FROM build AS publish
 ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "Bot.EngTubeBot.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "Bot.ItalianInjector.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-ENTRYPOINT ["dotnet", "Bot.EngTubeBot.dll"]
+ENTRYPOINT ["dotnet", "Bot.ItalianInjector.dll"]
