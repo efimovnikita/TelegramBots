@@ -1,4 +1,6 @@
 ﻿using Bot.ListenYoutube.Services;
+using BotSharedLibrary;
+using Refit;
 using Serilog;
 using Telegram.Bot;
 
@@ -16,6 +18,16 @@ var host = Host.CreateDefaultBuilder(args)
         services.AddScoped<UpdateHandler>();
         services.AddScoped<ReceiverService>();
         services.AddHostedService<PollingService>();
+        
+        services.AddRefitClient<IFileSharingApi>()
+            .ConfigureHttpClient(client => client.BaseAddress = new Uri(context.Configuration["Urls:GatewayBaseAddress"] ?? ""));
+        
+        services.AddRefitClient<IAuthApi>()
+            .ConfigureHttpClient(client => client.BaseAddress = new Uri(context.Configuration["Urls:AuthGatewayBaseAddress"] ?? ""));
+        
+        services.AddRefitClient<IYouTubeApi>()
+            .ConfigureHttpClient(client => client.BaseAddress = new Uri(context.Configuration["Urls:GatewayBaseAddress"] ?? ""));
+
     })
     .UseSerilog((context, configuration) =>
     {

@@ -13,6 +13,7 @@ COPY Bot.ListenYoutube/nuget/ /nuget
 RUN dotnet nuget add source /nuget
 
 COPY ["Bot.ListenYoutube/Bot.ListenYoutube.csproj", "Bot.ListenYoutube/"]
+COPY ["BotSharedLibrary/BotSharedLibrary.csproj", "BotSharedLibrary/"]
 RUN dotnet restore "Bot.ListenYoutube/Bot.ListenYoutube.csproj"
 COPY . .
 WORKDIR "/src/Bot.ListenYoutube"

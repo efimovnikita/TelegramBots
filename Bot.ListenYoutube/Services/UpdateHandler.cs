@@ -1,6 +1,6 @@
-using System.Net.Http.Headers;
-using System.Text.Json;
 using Bot.ListenYoutube.Models;
+using BotSharedLibrary;
+using Refit;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
@@ -12,10 +12,21 @@ using File = System.IO.File;
 
 namespace Bot.ListenYoutube.Services;
 
-public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger, IHttpClientFactory clientFactory, IConfiguration configuration) : IUpdateHandler
+public class UpdateHandler(
+    ITelegramBotClient bot,
+    ILogger<UpdateHandler> logger,
+    IConfiguration configuration,
+    IAuthApi authApi,
+    IYouTubeApi youTubeApi,
+    IFileSharingApi fileSharingApi) : IUpdateHandler
 {
+    private const string BotconfigurationClientid = "BotConfiguration:ClientId";
+    private const string BotconfigurationClientsecret = "BotConfiguration:ClientSecret";
     private static readonly InputPollOption[] PollOptions = ["Hello", "World!"];
     private readonly Dictionary<long, AudioMode> _inMemorySettings = [];
+    private TimeSpan _startTime;
+    private TimeSpan _endTime;
+    private bool _isSplitPresent;
 
     public async Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, HandleErrorSource source, CancellationToken cancellationToken)
     {
@@ -72,8 +83,8 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             var getSettingsResult = _inMemorySettings.TryGetValue(msg.Chat.Id, out var mode);
             if (getSettingsResult == false)
             {
-                mode = AudioMode.Both;
-                _inMemorySettings.Add(msg.Chat.Id, AudioMode.Both);
+                mode = AudioMode.Link;
+                _inMemorySettings.Add(msg.Chat.Id, AudioMode.Link);
             }
             
             logger.LogInformation("Selected message mode: {Mode}", mode);
@@ -92,76 +103,57 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
-            var url = msgText.Split(' ')[0];
+            var args = msgText.Split(' ');
+            var url = args[0];
             if (string.IsNullOrEmpty(url))
             {
                 return await bot.SendTextMessageAsync(msg.Chat, "Url is empty",
                     replyParameters: new ReplyParameters { MessageId = msg.MessageId });
             }
 
-            var httpClient = clientFactory.CreateClient();
-            httpClient.Timeout = TimeSpan.FromMinutes(5);
-
-            var healthUrl = configuration["Urls:AudioEndpointHealth"];
-            if (healthUrl == null)
+            if (args.Length == 3)
             {
-                return await bot.SendTextMessageAsync(msg.Chat,
-                    "Unable to check the fact that the main endpoint is healthy",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+                var startTimeStr = args[1];
+                var endTimeStr = args[2];
+
+                const string format = @"hh\:mm\:ss";
+                if (TimeSpan.TryParseExact(startTimeStr, format, null, out var startTime) &&
+                    TimeSpan.TryParseExact(endTimeStr, format, null, out var endTime))
+                {
+                    _startTime = startTime;
+                    _endTime = endTime;
+                    
+                    _isSplitPresent = true;
+                }
+                else
+                {
+                    _isSplitPresent = false;
+                }
             }
-
-            var healthRequest = new HttpRequestMessage
+            else
             {
-                Method = HttpMethod.Get,
-                RequestUri = new Uri(healthUrl),
-            };
-            using var healthResponse = await httpClient.SendAsync(healthRequest);
-            if (healthResponse.IsSuccessStatusCode == false)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Audio microservice is unhealthy",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var authServer = configuration["Urls:AuthServer"];
-            var clientId = configuration["BotConfiguration:ClientId"];
-            var clientSecret = configuration["BotConfiguration:ClientSecret"];
-
-            if ((authServer != null && clientId != null && clientSecret != null) == false)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
-
-            var authData = await GetAuthData(httpClient, authServer, clientId, clientSecret);
-            if (authData == null)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+                _isSplitPresent = false;
             }
             
-            var audioEndpointUrl = configuration["Urls:AudioEndpoint"];
-            if (audioEndpointUrl == null)
-            {
-                return await bot.SendTextMessageAsync(msg.Chat,
-                    "Unable to send the request to audio endpoint. Provide url to the endpoint",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-            }
+            await youTubeApi.CheckHealth();
 
-            var audioRequest = new HttpRequestMessage
-            {
-                Method = HttpMethod.Get,
-                RequestUri = new Uri($"{audioEndpointUrl}?videoUrl={url}"),
-                Headers =
-                {
-                    { "Authorization", $"Bearer {authData.AccessToken}" },
-                },
+            var data = new Dictionary<string, string> {
+                { IAuthApi.GrantType, IAuthApi.ClientCredentials },
+                { IAuthApi.ClientId, configuration[BotconfigurationClientid] ?? "" },
+                { IAuthApi.ClientSecret, configuration[BotconfigurationClientsecret] ?? "" }
             };
 
-            using var audioResponse = await httpClient.SendAsync(audioRequest);
-            if (audioResponse.IsSuccessStatusCode == false)
+            var authData = await authApi.GetAuthData(data);
+
+            Stream audioResponse;
+            var authorization = $"Bearer {authData.AccessToken}";
+            if (_isSplitPresent == false)
             {
-                return await bot.SendTextMessageAsync(msg.Chat, "Response from audio endpoint was unsuccessful",
-                    replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+                audioResponse = await youTubeApi.GetAudio(authorization, url);
+            }
+            else
+            {
+                audioResponse = await youTubeApi.GetSplitAudio(authorization, url, _startTime.ToString(), _endTime.ToString());
             }
             
             var filename = $"{Guid.NewGuid()}.mp3";
@@ -169,7 +161,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             audioFilePath = Path.Combine(Path.GetTempPath(), filename);
             await using (FileStream fileStream = new(audioFilePath, FileMode.Create, FileAccess.Write))
             {
-                await audioResponse.Content.CopyToAsync(fileStream);
+                await audioResponse.CopyToAsync(fileStream);
             }
             
             var fileInfo = new FileInfo(audioFilePath);
@@ -196,7 +188,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
                     }
                     case AudioMode.Link:
                     {
-                        return await UploadFileToFileSharingServer(msg, httpClient, authData, authServer, clientId, clientSecret, audioFilePath);
+                        return await UploadFileToFileSharingServer(msg, audioFilePath);
                     }
                     case AudioMode.Both:
                     default:
@@ -214,7 +206,7 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
             }
             else
             {
-                return await UploadFileToFileSharingServer(msg, httpClient, authData, authServer, clientId, clientSecret, audioFilePath);
+                return await UploadFileToFileSharingServer(msg, audioFilePath);
             }
         }
         finally
@@ -227,137 +219,24 @@ public class UpdateHandler(ITelegramBotClient bot, ILogger<UpdateHandler> logger
         }
     }
 
-    private async Task<Message> UploadFileToFileSharingServer(Message msg, HttpClient httpClient, AuthData? authData,
-        string authServer, string clientId, string clientSecret, string audioFilePath)
+    private async Task<Message> UploadFileToFileSharingServer(Message msg, string audioFilePath)
     {
-        // we need to upload the huge file to remote server and get the download link, but before doing that we need to check the endpoint health and to check our auth token
-        var fileSharingEndpointHealthUrl = configuration["Urls:FileSharingEndpointHealth"];
-        if (fileSharingEndpointHealthUrl == null)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat,
-                "Unable to determine the health status of the file sharing endpoint",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-                
-        var uploadEndHealthRequest = new HttpRequestMessage
-        {
-            Method = HttpMethod.Get,
-            RequestUri = new Uri(fileSharingEndpointHealthUrl),
+        var data = new Dictionary<string, string> {
+            { IAuthApi.GrantType, IAuthApi.ClientCredentials },
+            { IAuthApi.ClientId, configuration[BotconfigurationClientid] ?? "" },
+            { IAuthApi.ClientSecret, configuration[BotconfigurationClientsecret] ?? "" }
         };
-                
-        using var uploadEndHealthResponse = await httpClient.SendAsync(uploadEndHealthRequest);
-        if (uploadEndHealthResponse.IsSuccessStatusCode == false)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat, "File sharing endpoint is down",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
+
+        var authData = await authApi.GetAuthData(data);
         
-        if (authData == null)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-                
-        if (authData.ShouldRefreshToken())
-        {
-            authData = await GetAuthData(httpClient, authServer, clientId, clientSecret);
-        }
-                
-        if (authData == null)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat, "Unable to authorize the bot",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-
-        var fileSharingEndpointUrl = configuration["Urls:FileSharingEndpoint"];
-        if (fileSharingEndpointUrl == null)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat, "Unable to get the file sharing endpoint url",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-                
-        var uploadFileRequest = new HttpRequestMessage
-        {
-            Method = HttpMethod.Post,
-            RequestUri = new Uri(fileSharingEndpointUrl),
-            Headers =
-            {
-                { "Authorization", $"Bearer {authData.AccessToken}" },
-            },
-        };
-
-        var content = new MultipartFormDataContent();
-        var fileBytes = await File.ReadAllBytesAsync(audioFilePath);
-        var fileContent = new ByteArrayContent(fileBytes);
-        fileContent.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data");
-        content.Add(fileContent, "file", Path.GetFileName(audioFilePath));
-        uploadFileRequest.Content = content;
-                
-        using var uploadFileResponse = await httpClient.SendAsync(uploadFileRequest);
-        if (uploadFileResponse.IsSuccessStatusCode == false)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat,
-                $"Unable to upload the audio file to file sharing server. StatusCode: {uploadFileResponse.StatusCode}",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-                
-        var uploadResultStr = await uploadFileResponse.Content.ReadAsStringAsync();
-        if (string.IsNullOrEmpty(uploadResultStr))
-        {
-            return await bot.SendTextMessageAsync(msg.Chat,
-                "Unable to get upload data from file sharing server",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
-                
-        var uploadData = JsonSerializer.Deserialize<UploadData>(uploadResultStr);
-        if (uploadData == null)
-        {
-            return await bot.SendTextMessageAsync(msg.Chat,
-                "Unable to get upload data from file sharing server",
-                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
-        }
+        var fileStream = File.OpenRead(audioFilePath);
+        var streamPart = new StreamPart(fileStream, Path.GetFileName(audioFilePath), "multipart/form-data");
+                    
+        var uploadData = await fileSharingApi.UploadFile($"Bearer {authData.AccessToken}", streamPart);
 
         return await bot.SendTextMessageAsync(msg.Chat, $"<a href=\"{uploadData.FileUrl}\">Audio link</a>",
             replyParameters: new ReplyParameters { MessageId = msg.MessageId },
             parseMode: ParseMode.Html);
-    }
-
-    private async Task<AuthData?> GetAuthData(HttpClient httpClient, string authServer, string clientId,
-        string clientSecret)
-    {
-        try
-        {
-            var authRequest = new HttpRequestMessage
-            {
-                Method = HttpMethod.Post,
-                RequestUri = new Uri(authServer),
-                Content = new FormUrlEncodedContent(new Dictionary<string, string>
-                {
-                    { "grant_type", "client_credentials" },
-                    { "client_id", clientId },
-                    { "client_secret", clientSecret },
-                })
-            };
-            using var authResponse = await httpClient.SendAsync(authRequest);
-            if (authResponse.IsSuccessStatusCode == false)
-            {
-                return null;
-            }
-
-            var authStr = await authResponse.Content.ReadAsStringAsync();
-
-            if (string.IsNullOrEmpty(authStr))
-            {
-                return null;
-            }
-
-            return JsonSerializer.Deserialize<AuthData>(authStr);
-        }
-        catch (Exception e)
-        {
-            logger.LogError(e, "Error while getting the auth data");
-            return null;
-        }
     }
 
     // Process Inline Keyboard callback data
