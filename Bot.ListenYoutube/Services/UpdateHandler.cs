@@ -216,6 +216,11 @@ public class UpdateHandler(
                 File.Delete(audioFilePath);
                 logger.LogInformation("The file '{Path}' was deleted", audioFilePath);
             }
+
+            // Reset the split-related variables
+            _startTime = default;
+            _endTime = default;
+            _isSplitPresent = false;
         }
     }
 
