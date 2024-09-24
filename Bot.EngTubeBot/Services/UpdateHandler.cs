@@ -37,7 +37,10 @@ public class UpdateHandler(
     private const string KeyCommand = "/key";
     private const string PromptCommand = "/prompt";
     private const string InjectCommand = "/inject";
-    
+    private const string BotconfigurationClientid = "BotConfiguration:ClientId";
+    private const string BotconfigurationClientsecret = "BotConfiguration:ClientSecret";
+    private const string? MultipartFormData = "multipart/form-data";
+
     public async Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, HandleErrorSource source, CancellationToken cancellationToken)
     {
         logger.LogInformation("HandleError: {Exception}", exception);
@@ -304,8 +307,8 @@ public class UpdateHandler(
                 {
                     var data = new Dictionary<string, string> {
                         { IAuthApi.GrantType, IAuthApi.ClientCredentials },
-                        { IAuthApi.ClientId, configuration["BotConfiguration:ClientId"] ?? "" },
-                        { IAuthApi.ClientSecret, configuration["BotConfiguration:ClientSecret"] ?? "" }
+                        { IAuthApi.ClientId, configuration[BotconfigurationClientid] ?? "" },
+                        { IAuthApi.ClientSecret, configuration[BotconfigurationClientsecret] ?? "" }
                     };
 
                     var authData = await authApi.GetAuthData(data);
@@ -333,7 +336,7 @@ public class UpdateHandler(
                     await File.WriteAllTextAsync(htmFilePath, htmFileContent);
                     
                     var fileStream = File.OpenRead(htmFilePath);
-                    var streamPart = new StreamPart(fileStream, Path.GetFileName(htmFilePath), "multipart/form-data");
+                    var streamPart = new StreamPart(fileStream, Path.GetFileName(htmFilePath), MultipartFormData);
                     
                     var uploadData = await fileSharingApi.UploadFile($"Bearer {authData.AccessToken}", streamPart);
 
@@ -441,18 +444,25 @@ public class UpdateHandler(
 
     private async Task<Message> SendToCloudAndGetTranslation(Message msg, string filePath, UserSettings? settings)
     {
+        var languageFromAudio = await GetLanguageDetectionResult(filePath);
+        if (languageFromAudio.Language.Equals("en", StringComparison.InvariantCultureIgnoreCase))
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, "The detected language is English. We are working only with other languages.",
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
+        
         await audioApi.CheckHealth();
 
         var data = new Dictionary<string, string> {
             { IAuthApi.GrantType, IAuthApi.ClientCredentials },
-            { IAuthApi.ClientId, configuration["BotConfiguration:ClientId"] ?? "" },
-            { IAuthApi.ClientSecret, configuration["BotConfiguration:ClientSecret"] ?? "" }
+            { IAuthApi.ClientId, configuration[BotconfigurationClientid] ?? "" },
+            { IAuthApi.ClientSecret, configuration[BotconfigurationClientsecret] ?? "" }
         };
 
         var authData = authApi.GetAuthData(data).ConfigureAwait(false).GetAwaiter().GetResult();
         
         var fileStream = File.OpenRead(filePath);
-        var streamPart = new StreamPart(fileStream, Path.GetFileName(filePath), "multipart/form-data");
+        var streamPart = new StreamPart(fileStream, Path.GetFileName(filePath), MultipartFormData);
         
         var jobInfo = await audioApi.MakeTranslationFromAudio($"Bearer {authData.AccessToken}",
             streamPart,
@@ -466,6 +476,24 @@ public class UpdateHandler(
         }
 
         return await CheckTranslationStatusAsync(jobInfo.JobId, msg, settings);
+    }
+
+    private async Task<LanguageDetectionResult> GetLanguageDetectionResult(string filePath)
+    {
+        var data = new Dictionary<string, string> {
+            { IAuthApi.GrantType, IAuthApi.ClientCredentials },
+            { IAuthApi.ClientId, configuration[BotconfigurationClientid] ?? "" },
+            { IAuthApi.ClientSecret, configuration[BotconfigurationClientsecret] ?? "" }
+        };
+
+        var authData = authApi.GetAuthData(data).ConfigureAwait(false).GetAwaiter().GetResult();
+            
+        var fs = File.OpenRead(filePath);
+        var streamPart = new StreamPart(fs, Path.GetFileName(filePath), MultipartFormData);
+
+        var languageFromAudio =
+            await audioApi.DetectLanguageFromAudio($"Bearer {authData.AccessToken}", streamPart);
+        return languageFromAudio;
     }
 
     private async Task<string> SaveBytesToFile(byte[] bytes)

@@ -16,4 +16,9 @@ public interface IAudioApi
     
     [Get("/api/gateway/audio/v1/translate/status?id={jobId}")]
     Task<JobStatus> CheckJobStatus(string jobId);
+    
+    [Multipart]
+    [Post("/api/gateway/audio/v1/language")]
+    Task<LanguageDetectionResult> DetectLanguageFromAudio([Header("Authorization")] string authorization,
+        [AliasAs("audioFile")] StreamPart file);
 }
