@@ -15,7 +15,17 @@ public interface IAudioApi
         [AliasAs("openaiApiKey")] string openaiApiKey);
     
     [Get("/api/gateway/audio/v1/translate/status?id={jobId}")]
-    Task<JobStatus> CheckJobStatus(string jobId);
+    Task<JobStatus> CheckTranslationStatus(string jobId);
+    
+    [Multipart]
+    [Post("/api/gateway/audio/v1/transcribe")]
+    Task<JobInfo> TranscribeAudio([Header("Authorization")] string authorization,
+        [AliasAs("audioFile")] StreamPart file,
+        [AliasAs("openaiApiKey")] string openaiApiKey,
+        [AliasAs("prompt")] string prompt);
+
+    [Get("/api/gateway/audio/v1/transcribe/status?id={jobId}")]
+    Task<JobStatus> CheckTranscriptionStatus(string jobId);
     
     [Multipart]
     [Post("/api/gateway/audio/v1/language")]

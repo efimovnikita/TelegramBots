@@ -279,7 +279,7 @@ public class UpdateHandler(
 
         while (DateTime.UtcNow - startTime < MaxWaitTime)
         {
-            var jobStatus = await audioApi.CheckJobStatus(jobId);
+            var jobStatus = await audioApi.CheckTranslationStatus(jobId);
 
             if (jobStatus.Status == "Failed")
             {
