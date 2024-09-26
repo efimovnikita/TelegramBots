@@ -21,13 +21,17 @@ var host = Host.CreateDefaultBuilder(args)
         
         services.AddRefitClient<IFileSharingApi>()
             .ConfigureHttpClient(client => client.BaseAddress = new Uri(context.Configuration["Urls:GatewayBaseAddress"] ?? ""));
-        
-        services.AddRefitClient<IAuthApi>()
-            .ConfigureHttpClient(client => client.BaseAddress = new Uri(context.Configuration["Urls:AuthGatewayBaseAddress"] ?? ""));
-        
-        services.AddRefitClient<IYouTubeApi>()
-            .ConfigureHttpClient(client => client.BaseAddress = new Uri(context.Configuration["Urls:GatewayBaseAddress"] ?? ""));
 
+        services.AddRefitClient<IAuthApi>()
+            .ConfigureHttpClient(client =>
+                client.BaseAddress = new Uri(context.Configuration["Urls:AuthGatewayBaseAddress"] ?? ""));
+
+        services.AddRefitClient<IYouTubeApi>()
+            .ConfigureHttpClient(client =>
+            {
+                client.BaseAddress = new Uri(context.Configuration["Urls:GatewayBaseAddress"] ?? "");
+                client.Timeout = TimeSpan.FromMinutes(5);
+            });
     })
     .UseSerilog((context, configuration) =>
     {
