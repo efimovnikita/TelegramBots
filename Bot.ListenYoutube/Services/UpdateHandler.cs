@@ -209,6 +209,11 @@ public class UpdateHandler(
                 return await UploadFileToFileSharingServer(msg, audioFilePath);
             }
         }
+        catch (Exception ex)
+        {
+            return await bot.SendTextMessageAsync(msg.Chat, ex.GetType() + "\n" + ex.Message,
+                replyParameters: new ReplyParameters { MessageId = msg.MessageId });
+        }
         finally
         {
             if (string.IsNullOrEmpty(audioFilePath) == false && File.Exists(audioFilePath))
