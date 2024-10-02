@@ -75,6 +75,7 @@ public class UpdateHandler(
 
     private async Task<Message> DefaultBehaviour(Message msg)
     {
+        var waitingMessage = await bot.SendTextMessageAsync(msg.Chat, "\u23f3");
         var audioFilePath = "";
 
         try
@@ -216,6 +217,8 @@ public class UpdateHandler(
         }
         finally
         {
+            await bot.DeleteMessageAsync(msg.Chat, waitingMessage.MessageId);
+
             if (string.IsNullOrEmpty(audioFilePath) == false && File.Exists(audioFilePath))
             {
                 File.Delete(audioFilePath);
